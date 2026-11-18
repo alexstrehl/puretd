@@ -6,6 +6,7 @@
  */
 
 #include "bg_engine.h"
+#include "../c_inference/prob5_sanity.h"
 #include <stdint.h>
 #include <assert.h>
 #include <string.h>  /* memcpy, memset */
@@ -710,39 +711,11 @@ int get_legal_plays_encoded_21(const BoardState *next_state,
 }
 
 
-/* Rules from GNU Backgammon 1.08 SanityCheck (eval.c); independent
-   reimplementation. Same code as nn_eval.c prob5_sanity_zero; parity:
-   tests/test_prob5_sanity.py TestCCopiesParity. */
+/* prob5 board-sanity masks of n perspective196 rows (rules:
+   c_inference/prob5_sanity.h, the one C implementation). */
 int prob5_impossible_mask(const float *x, int n, unsigned char *mask) {
     int any = 0;
-    for (int r = 0; r < n; r++, x += NUM_FEATURES, mask += 4) {
-        /* s = 0: my side (gnubg side 1), 1: the opponent (gnubg side 0) */
-        int ac[2], back[2], cross[2], gcross[2];
-        for (int s = 0; s < 2; s++) {
-            const float *b = x + 98 * s;
-            ac[s] = cross[s] = back[s] = 0;
-            gcross[s] = 1;
-            for (int k = 0; k < 24; k++) {
-                const float *f = b + 4 * k;
-                if (f[0] == 0.0f) continue;
-                int c = (int)(f[0] + f[1] + f[2] + 2.0f * f[3] + 0.5f);
-                int i = s ? 23 - k : k;          /* gnubg point index */
-                if (i > back[s]) back[s] = i;
-                ac[s] += c;
-                cross[s] += (1 + i / 6) * c;
-                gcross[s] += (i / 6) * c;
-            }
-            int bar = (int)(2.0f * b[96] + 0.5f);
-            if (bar) {
-                back[s] = 24; ac[s] += bar; cross[s] += 5 * bar; gcross[s] += 4 * bar;
-            }
-        }
-        int race = back[0] + back[1] < 24;
-        mask[0] = ac[1] < 15 || (race && cross[0] > 8 * gcross[1]);
-        mask[1] = ac[1] < 15 || (race && back[1] < 18);
-        mask[2] = ac[0] < 15 || (race && cross[1] > 8 * gcross[0] - 4);
-        mask[3] = ac[0] < 15 || (race && back[0] < 18);
-        any += mask[0] | mask[1] | mask[2] | mask[3];
-    }
+    for (int r = 0; r < n; r++, x += NUM_FEATURES, mask += 4)
+        any += prob5_ruled_out(x, mask);
     return any;
 }

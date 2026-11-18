@@ -1,0 +1,42 @@
+# MKL shim: off
+# core: 2  tier: slow  date: 2026-11-13T04:17:00Z
+bench.sh  core=2  tier=slow  fpcap=full  p1root=0.08  rows=,all,  sweep=5
+
+########## FIXED-POOL gnubg 2-ply (cubeless checker + cubeful checker + cube) ##########
+GNU Backgammon 1.08.003 20261113
+
+Copyright (C) 1999-2004 Gary Wong.
+Copyright (C) 2004-2024 the AUTHORS; for details type `show version'.
+
+This program comes with ABSOLUTELY NO WARRANTY; for details type `show warranty'.
+This is free software, and you are welcome to redistribute it under certain conditions; type `show copying' for details.
+
+# gnubg timing: native benchpool
+pool: 8000 positions from experiments/benchmarks/fixedpool_positions.json (mode=both)
+FIXEDPOOL findbestmove 2-ply (default filters): 8000 pos 110.60s | 72.3 moves/s 95%CI [70.5,74.1] | 13.825 ms/move
+cubeful pool: 10000 checker + 6000 cube points from experiments/benchmarks/fixedpool_cubeful_positions.json
+FIXEDPOOL cubeful findbestmove 2-ply (default filters): 10000 pos 133.05s | 75.2 moves/s 95%CI [73.6,77.0] | 13.305 ms/move
+FIXEDPOOL cube cfevaluate 2-ply: 6000 pos 24.26s | 247.3 evals/s 95%CI [243.5,251.2] | 4.0435 ms/eval
+FIXEDPOOL GNUBG ALLDONE
+
+########## FIXED-POOL native cubeless 1-ply (PureTD prob5 C API [torch,simd] 1-ply root-filter 0.08) ##########
+[fixedpool] loaded 8000 checker decisions from the committed pool
+# C API backend torch: torch 2.5.1 mkl=yes threads=1
+# C API backend simd: simd avx512 VL16 mr<=6 nv4 (mr1 nv8) sparse1=1 sparse_mr=12 delta0=1
+
+=== Fixed-pool cubeless per-decision (native, single pinned core, committed pool of 8000, cap=8000) ===
+    prob5 workload: cubeless_prob5_512_512_256_256.pt md5 ac95a983
+prob5c[torch]-1ply root-filter 0.08 checker      80.0 moves/s  95%CI [75.9,84.4]
+prob5c[simd]-1ply root-filter 0.08 checker     558.0 moves/s  95%CI [529.9,587.5]
+
+########## FIXED-POOL native cubeful 1-ply (puretdc,sage,sage-filt; PureTD 1-ply root-filter 0.08) ##########
+[cubeful pool] loaded 10000 checker pts, 6000 cube pts from the committed artifact
+[cubeful pool] timing 10000 checker, 6000 cube points
+# C API backend torch: torch 2.5.1 mkl=yes threads=1
+PureTD-C[torch] 1-ply root-filter 0.08 (4L cubeful) checker      63.5 dec/s 95%CI [59.7,67.1] (15.759 ms)  |  cube     136.5 dec/s 95%CI [133.5,139.7] (7.328 ms)
+# C API backend simd: simd avx512 VL16 mr<=6 nv4 (mr1 nv8) sparse1=1 sparse_mr=12 delta0=1
+PureTD-C[simd] 1-ply root-filter 0.08 (4L cubeful) checker     473.6 dec/s 95%CI [448.8,499.2] (2.112 ms)  |  cube    1048.2 dec/s 95%CI [1024.8,1073.1] (0.954 ms)
+Open Sage 1-ply            checker      51.9 dec/s 95%CI [50.0,54.1] (19.255 ms)  |  cube    1866.6 dec/s 95%CI [1834.3,1898.3] (0.536 ms)
+Open Sage 1-ply filtered   checker    1074.3 dec/s 95%CI [1044.1,1102.2] (0.931 ms)
+
+########## DONE -> ~/bench_results/zen5_9600x_20261113/slow/bench_sweep5.txt.tmp ##########

@@ -38,27 +38,23 @@ _DICE_OUTCOMES = [(d1, d2) for d1 in range(1, 7) for d2 in range(d1, 7)]
 
 
 def _sanity_matrix() -> np.ndarray:
-    """(196, 8) map from perspective196 features to gnubg SanityCheck's
-    per-side counts: (ac, anCross, anGammonCross - 1) for my side, the
-    same for the opponent, then my and the opponent's occupancy bitmask
-    (bit i = gnubg point i >= 1 occupied, bar adds >= 2^24; exact in
-    float32).
-    gnubg side 1 (on roll) = our "my" block, side 0 = the opp block;
-    gnubg point i (owner's point - 1, 24 = bar) is my block i, opp
-    block 23 - i."""
-    m = np.zeros((196, 8), dtype=np.float32)
+    """(196, 4) map from perspective196 features to the per-side counts
+    of the board-sanity rules (c_inference/prob5_sanity.h): my and the
+    opponent's checkers on the board, then my and the opponent's
+    occupancy bitmask (bit p = point p + 1 occupied, p >= 1; a checker on
+    the bar adds at least 2^24, so only the top bit matters and frexp
+    reads it exactly). p is the owner's point - 1: my block's point k is
+    p = k, the opponent's (mirrored) p = 23 - k."""
+    m = np.zeros((196, 4), dtype=np.float32)
     thermo = np.array([1.0, 1.0, 1.0, 2.0], dtype=np.float32)
     for side, base, bar in ((0, 0, 96), (1, 98, 194)):
         for k in range(24):
-            i = k if side == 0 else 23 - k
-            rows = slice(base + 4 * k, base + 4 * k + 4)
-            m[rows, 3 * side] = thermo
-            m[rows, 3 * side + 1] = thermo * (1 + i // 6)
-            m[rows, 3 * side + 2] = thermo * (i // 6)
-            if i:
-                m[base + 4 * k, 6 + side] = 2.0 ** i   # first unit: 1 iff >= 1
-        m[bar, 3 * side: 3 * side + 3] = (2.0, 10.0, 8.0)   # bar/2 * (1, 5, 4)
-        m[bar, 6 + side] = 2.0 ** 25
+            p = k if side == 0 else 23 - k
+            m[base + 4 * k: base + 4 * k + 4, side] = thermo
+            if p:
+                m[base + 4 * k, 2 + side] = 2.0 ** p   # first unit: 1 iff >= 1
+        m[bar, side] = 2.0                            # bar/2 * 2
+        m[bar, 2 + side] = 2.0 ** 25
     return m
 
 
@@ -66,28 +62,30 @@ _SANITY_M = _sanity_matrix()
 
 
 def _prob5_impossible_np(x: np.ndarray):
-    """gnubg 1.08 SanityCheck's "impossible" rules (eval.c) on (N, 196)
+    """The board-sanity rules (c_inference/prob5_sanity.h) on (N, 196)
     perspective196 features, outputs from the on-roll player's view:
-      opp has borne off -> P(wg) = P(wbg) = 0; I have -> P(lg) = P(lbg) = 0;
-      else, no contact (anBack sum < 24): P(wbg) = 0 if opp anBack < 18,
-      P(lbg) = 0 if my anBack < 18, P(wg) = 0 if my anCross >
-      8 * opp anGammonCross, P(lg) = 0 if opp anCross > 8 * my
-      anGammonCross - 4.
+      a side that has borne off cannot lose a gammon: the opponent off ->
+      P(wg) = P(wbg) = 0, me off -> P(lg) = P(lbg) = 0;
+      in a race (rearmost points sum < 24): P(wbg) = 0 if the opponent's
+      rearmost point < 18 (none in my home board or on the bar), P(lbg) = 0
+      if mine is.
+    Both rules match impossibility cases that GNU Backgammon's evaluator
+    also zeroes (SanityCheck in its eval.c).
     Returns an (N, 4) bool mask over (wg, wbg, lg, lbg), or None when
-    nothing is impossible."""
+    nothing is ruled out."""
     s = x @ _SANITY_M
-    # anBack: highest occupied point, 0 if none; >= 24 if on the bar.
-    back = np.frexp(s[:, 6:] + 1.0)[1] - 1
-    race = back.sum(axis=1) < 24
-    off = s[:, 0:6:3] < 14.5
+    # rearmost point: highest occupied p, 0 if none; >= 24 with the bar.
+    rearmost = np.frexp(s[:, 2:] + 1.0)[1] - 1
+    race = rearmost.sum(axis=1) < 24
+    off = s[:, :2] < 14.5
     if not (race.any() or off.any()):
         return None
     off_my, off_opp = off[:, 0], off[:, 1]
     return np.stack((
-        off_opp | (race & (s[:, 1] > 8 * (s[:, 5] + 1))),
-        off_opp | (race & (back[:, 1] < 18)),
-        off_my | (race & (s[:, 4] > 8 * (s[:, 2] + 1) - 4)),
-        off_my | (race & (back[:, 0] < 18)),
+        off_opp,
+        off_opp | (race & (rearmost[:, 1] < 18)),
+        off_my,
+        off_my | (race & (rearmost[:, 0] < 18)),
     ), axis=1)
 
 
@@ -101,8 +99,7 @@ def prob5_impossible(x: np.ndarray):
 
 def prob5_sanity(probs: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     """:func:`prob5_impossible` zeroing, then the
-    :func:`model.prob5_postprocess` clamps (in numpy on CPU, same values).
-    Certain-win/gammon and the contact noise cut are not applied."""
+    :func:`model.prob5_postprocess` clamps (in numpy on CPU, same values)."""
     mask = prob5_impossible(x.detach().cpu().numpy())
     if probs.device.type != "cpu" or probs.dtype != torch.float32:
         if mask is not None:
@@ -130,7 +127,7 @@ def board_sanity_from_env(var: str, default: bool, environ=None) -> bool:
 
 
 def require_cpu(name: str, network, device) -> None:
-    """Play-time prob5 / Prob5Jan / bo: agents run on CPU only."""
+    """Play-time prob5 / Prob5Jan agents run on CPU only."""
     on_gpu = torch.device(device).type != "cpu" or any(
         p.device.type != "cpu" for p in network.parameters())
     if on_gpu:
@@ -143,7 +140,7 @@ class ProbAgent(Agent):
 
     Values are money equity from the 5 outputs after the
     :func:`model.prob5_postprocess` clamps, or, with ``board_sanity``,
-    after :func:`prob5_sanity` (gnubg's impossible-gammon zeroing +
+    after :func:`prob5_sanity` (board-sanity zeroing +
     clamps; on for Prob5Jan, off by default for plain prob5). Move
     selection minimises opponent-view equity at ``plies`` 0 or 1.
     Training primitives are not implemented: prob5 training lives in

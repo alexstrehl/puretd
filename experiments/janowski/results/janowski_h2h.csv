@@ -1,16 +1,14 @@
-# Learned versus heuristic cube handling. Mean mEq/game for
-# side1 over side2: cubeful money, Jacoby on, both sides 0-ply with the exact
-# bearoff tables, capped +/-128 (uncapped agrees). Chunks pooled with
-# run.py --combine.
-# All rows at JANOWSKI_REV 2026-10-06c (recorded in every npz).
-# PureTD_4L_bo = bo:best_models/cubeful_money_512_512_256_256.pt (6afda0f8).
-# prob5_janowski = janowski:best_models/cubeless_prob5_512_512_256_256.pt
-# (ac95a983); x = JANOWSKI_X.
-# status: headline = the reported row (x = JANOWSKI_X default 0.76);
-# sweep = other x.
-# Per-game raws available on request; CIs recreatable via run.py --combine.
-side1,side1_md5,side1_plies,side2,side2_md5,side2_plies,x,mode,games,capped_edge_mEq,ci_lo,ci_hi,status
-PureTD_4L_bo,6afda0f8,0,prob5_janowski,ac95a983,0,0.76,cubeful-money,10000000,15.5,13.8,17.2,headline
-PureTD_4L_bo,6afda0f8,0,prob5_janowski,ac95a983,0,0.70,cubeful-money,10000000,17.0,15.1,18.9,sweep
-PureTD_4L_bo,6afda0f8,0,prob5_janowski,ac95a983,0,0.68,cubeful-money,10000000,17.4,15.6,19.3,sweep
-PureTD_4L_bo,6afda0f8,0,prob5_janowski,ac95a983,0,0.60,cubeful-money,10000000,29.2,27.2,31.2,sweep
+# Learned versus heuristic cube handling. Mean mEq/game for side1 over
+# side2: cubeful money, Jacoby on, both sides 0-ply (C API), no bearoff
+# tables, independent dice, luck-adjusted (variance.py, beta 1, luck
+# reference cubeful 6afda0f8), 95% CIs over game pairs. capped = payoff
+# clipped to +/-128 before the luck is subtracted.
+# PureTD_4L = best_models/history/cubeful_money_512_512_256_256_6afda0f8.pt.
+# prob5_janowski = janowski:best_models/history/cubeless_prob5_512_512_256_256_ac95a983.pt.
+# Table 21 sides: best_models/history/ (md5 in the name).
+# Prob5Jan: x = 0.76, board sanity on, JANOWSKI_REV 2026-11-17.
+# Pooled summaries: the results/*_vr_1.2M.json files (variance.py --summarize).
+side1,side1_md5,side1_plies,side2,side2_md5,side2_plies,x,mode,games,capped_edge_mEq,ci_lo,ci_hi,uncapped_edge_mEq,uncapped_ci_lo,uncapped_ci_hi,status
+PureTD_4L,6afda0f8,0,prob5_janowski,ac95a983,0,0.76,cubeful-money,1200000,15.3,14.8,15.7,15.3,14.8,15.7,table7
+PureTD_run1_c3,7677895c,0,prob5_run1_c5_janowski,44da01ee,0,0.76,cubeful-money,1200000,16.5,16.0,16.9,16.5,16.0,16.9,table21_run1
+PureTD_run2_c3,0ff8457f,0,prob5_run2_c5_janowski,98c16095,0,0.76,cubeful-money,1200000,16.8,16.4,17.3,16.8,16.4,17.3,table21_run2

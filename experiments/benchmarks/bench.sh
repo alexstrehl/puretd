@@ -158,7 +158,7 @@ fi
 native "$B/fixedpool_bench.py" --mode cubeless --configs prob5c-1ply \
     --backends "$CAPI_LIST" ${FP_CAP:+--cap "$FP_CAP"} --root-filter "$P1_ROOT_FILTER"; }
 
-ENG=$(csv "${P_FP:+puretdc}" "${S_FP:+sage}")
+ENG=$(csv "${P_FP:+puretdc}" "${S_FP:+sage,sage-filt}")
 [ -n "$ENG" ] && { banner "FIXED-POOL native cubeful 1-ply ($ENG; PureTD $P1_TAG)"
 native "$B/fixedpool_bench.py" --mode cubeful --engines "$ENG" --plies 1 \
     --backends "$CAPI_LIST" ${FP_CAP:+--cap "$FP_CAP"} \

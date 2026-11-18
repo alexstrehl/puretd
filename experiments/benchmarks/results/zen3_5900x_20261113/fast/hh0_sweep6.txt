@@ -1,0 +1,27 @@
+# commit cef7f10f5e68cff1b533801cf99db099ae757d73  BENCH_CORE=4  BENCH_WARMUP_S=5  MKL shim off  date 2026-11-13T02:26:15Z
+
+########## nat experiments/benchmarks/fixedpool_bench.py --mode cubeless --configs prob5c-0ply,hh-fox-0ply,hh-aureus-0ply --backends torch,simd  ##########
+[fixedpool] loaded 8000 checker decisions from the committed pool
+# C API backend torch: torch 2.5.1 mkl=yes threads=1
+# C API backend simd: simd avx2 VL8 mr<=4 nv2 (mr1 nv8) sparse1=1 sparse_mr=12 delta0=1
+
+=== Fixed-pool cubeless per-decision (native, single pinned core, committed pool of 8000, cap=8000) ===
+    prob5 workload: cubeless_prob5_512_512_256_256.pt md5 ac95a983
+prob5c[torch]-0ply checker    4336.9 moves/s  95%CI [4240.3,4437.7]
+# prob5c[torch]-0ply via ctypes per call: 4183.7 moves/s 95%CI [4095.4,4275.6]
+prob5c[simd]-0ply checker   14765.4 moves/s  95%CI [14374.0,15185.4]
+# prob5c[simd]-0ply via ctypes per call: 13454.9 moves/s 95%CI [13128.7,13801.2]
+hh-fox-0ply      checker   21067.0 moves/s  95%CI [20417.2,21736.3]
+hh-aureus-0ply   checker    7252.9 moves/s  95%CI [6990.8,7525.9]
+
+########## nat experiments/benchmarks/fixedpool_bench.py --mode cubeful --engines puretdc,hh-fox0,hh-aureus0 --backends torch,simd  ##########
+[cubeful pool] loaded 10000 checker pts, 6000 cube pts from the committed artifact
+[cubeful pool] timing 10000 checker, 6000 cube points
+# C API backend torch: torch 2.5.1 mkl=yes threads=1
+PureTD-C[torch] 0-ply (4L cubeful) checker    4860.2 dec/s 95%CI [4756.0,4960.4] (0.206 ms)  |  cube   12230.6 dec/s 95%CI [12224.5,12235.9] (0.082 ms)
+# PureTD-C[torch] 0-ply (4L cubeful) via ctypes per call: checker 4665.0 dec/s | cube 11315.3 dec/s
+# C API backend simd: simd avx2 VL8 mr<=4 nv2 (mr1 nv8) sparse1=1 sparse_mr=12 delta0=1
+PureTD-C[simd] 0-ply (4L cubeful) checker   17178.8 dec/s 95%CI [16730.9,17608.5] (0.058 ms)  |  cube  100197.3 dec/s 95%CI [99981.8,100399.3] (0.010 ms)
+# PureTD-C[simd] 0-ply (4L cubeful) via ctypes per call: checker 15299.1 dec/s | cube 64976.7 dec/s
+HedgeHog fox 0-ply         checker   22548.4 dec/s 95%CI [21890.0,23165.0] (0.044 ms)  |  cube  278323.8 dec/s 95%CI [276601.4,280140.6] (0.004 ms)
+HedgeHog aureus 0-ply      checker    7270.8 dec/s 95%CI [7042.9,7498.8] (0.138 ms)  |  cube  106926.5 dec/s 95%CI [106195.3,107759.9] (0.009 ms)

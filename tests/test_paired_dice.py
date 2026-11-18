@@ -187,7 +187,7 @@ def test_unpaired_parallel_path_returns_no_pairing_and_writes_same_fields(tmp_pa
         "per_game", "game_mode", "side1", "side2", "n_games", "argv",
         "sage_unpruned", "sage_version", "janowski_x", "janowski_no_fold",
         "janowski_no_fold_0ply", "janowski_cubeless_checker",
-        "janowski_no_bearoff", "side1_md5", "side2_md5", "side1_depth",
+        "side1_md5", "side2_md5", "side1_depth",
         "side2_depth", "cube_cap", "jacoby", "bf16", "janowski_rev",
         "prob5_board_sanity", "hostname"])
 

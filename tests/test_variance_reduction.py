@@ -195,7 +195,7 @@ def test_pooling_refuses_duplicate_seed_pairs_and_different_reference(tmp_path):
 
 def test_worker_chunking_does_not_change_games(engines):
     a, b, ref = engines
-    V._ENGINES = (a, b, ref, 2, False, True, (0, 0))
+    V._ENGINES = (a, b, ref, 2, False, True, (0, 0), "paired")
     _, together = V._chunk((8, 4, 2))
     chunks = [V._chunk((8, i, 1))[1] for i in (4, 5)]
     for key in ("raw", "luck", "turns", "corrected"):
@@ -247,34 +247,6 @@ def test_cubeful_dice_values_match_independent_moves(cubeful_engines, owner, jac
             # below) supplies the current cube multiplier.
             np.testing.assert_array_equal(q, a.dice_values(
                 state, MatchState(CubeOwner(owner), 2, jacoby)))
-
-
-@pytest.mark.parametrize("owner", [0, 1, 2])
-def test_cubeful_dice_values_route_bearoff_like_best_move(owner):
-    # bgc_dice_values' e->bo branch: an attached table routes the 21
-    # successors exactly as the engine's own move choice does.
-    from modes import MatchState, CubeOwner
-    try:
-        e = P.Engine(str(V.DEFAULT_CF_4L), "simd", bearoff=True)
-    except FileNotFoundError as exc:
-        pytest.skip(f"bearoff tables not built: {exc}")
-    plain = P.Engine(str(V.DEFAULT_CF_4L), "simd")
-    try:
-        points = [0] * 24
-        points[2], points[4], points[7] = 3, 4, 2       # White: 2 checkers outside home
-        points[19], points[20], points[21] = -4, -2, -3  # Black: all home
-        race = BoardState(points, [0, 0], [6, 6], 0)
-        ms = MatchState(CubeOwner(owner), 1 if owner == 0 else 2, True)
-        for state in (race, bearoff(3), bearoff(3, 1)):
-            q = e.dice_values(state, ms)
-            want = [e.best_move(state, dice, ms)[2] for dice in DICE]
-            np.testing.assert_allclose(q, want, atol=2e-7, rtol=1e-6)
-        # The table, not the net, supplied these values (the 4L net is within ~5e-5 of exact here).
-        assert np.abs(e.dice_values(bearoff(3, 1), ms)
-                      - plain.dice_values(bearoff(3, 1), ms)).max() > 1e-5
-    finally:
-        e.close()
-        plain.close()
 
 
 @pytest.mark.parametrize("gammon", [2, 3])
@@ -509,7 +481,7 @@ def test_chunk_plays_native_sides_at_their_ply(engines):
     """variance.py's chunk at native plies (1, 0): side1 searches 1-ply in
     both seats, and the luck is bgc_play_game_vr's at those plies."""
     a, b, ref = engines
-    V._ENGINES = (a, b, ref, 1, False, True, (1, 0))
+    V._ENGINES = (a, b, ref, 1, False, True, (1, 0), "paired")
     _, d = V._chunk((8, 0, 2))
     for i, pid in enumerate(range(2)):
         for leg, (w, bl, pw, pb) in enumerate(((a, b, 1, 0), (b, a, 0, 1))):
@@ -519,3 +491,118 @@ def test_chunk_plays_native_sides_at_their_ply(engines):
             sign = 1 if leg == 0 else -1
             assert d["luck"][i, leg] == pytest.approx(sign * res["luck_white"], abs=1e-12)
             assert d["turns"][i, leg] == res["n_turns"]
+
+
+# ── independent dice and Prob5Jan players ───────────────────────────
+
+PROB5_4L = V.ROOT / "best_models/cubeless_prob5_512_512_256_256.pt"
+
+
+@pytest.fixture(scope="module")
+def jan_engine():
+    if not PROB5_4L.exists():
+        pytest.skip("prob5 checkpoint missing")
+    P.ensure_lib("simd")
+    e = P.Engine(str(PROB5_4L), "simd", janowski=True)
+    yield e
+    e.close()
+
+
+def test_leg_seeds_paired_and_independent():
+    for pid in (0, 7):
+        assert V.leg_seed(5, pid, 0) == V.leg_seed(5, pid, 1) == V.pair_seed(5, pid)
+        s0, s1 = V.leg_seed(5, pid, 0, "independent"), V.leg_seed(5, pid, 1, "independent")
+        assert len({s0, s1, V.pair_seed(5, pid)}) == 3
+        assert s0 == V.leg_seed(5, pid, 0, "independent")
+    with pytest.raises(ValueError, match="paired or independent"):
+        V.leg_seed(5, 0, 0, "other")
+
+
+def test_chunk_independent_dice_plays_each_leg_on_its_own_seed(engines):
+    a, b, ref = engines
+    V._ENGINES = (a, b, ref, 1, False, True, (0, 0), "independent")
+    _, d = V._chunk((8, 0, 3))
+    for pid in range(3):
+        for leg, (w, bl) in enumerate(((a, b), (b, a))):
+            res, _ = P.play_game(w, bl, P.game_opts(cubeful=False),
+                                 P.Rng(V.leg_seed(8, pid, leg, "independent"), "simd"),
+                                 reference=ref)
+            sign = 1 if leg == 0 else -1
+            assert d["luck"][pid, leg] == pytest.approx(sign * res["luck_white"], abs=1e-12)
+            assert d["turns"][pid, leg] == res["n_turns"]
+
+
+def test_janowski_player_luck_is_reference_only_and_play_unchanged(cubeful_engines, jan_engine):
+    from modes import MatchState, CubeOwner
+    a, _, ref = cubeful_engines
+    opts = P.game_opts(cubeful=True, jacoby=True)
+    for seed in range(4):
+        for white, black in ((a, jan_engine), (jan_engine, a)):
+            r0, r1 = P.Rng(seed, "simd"), P.Rng(seed, "simd")
+            base, rec0 = P.play_game(white, black, opts, r0, record=True)
+            vr, rec = P.play_game(white, black, opts, r1, record=True, reference=ref)
+            assert r0.getstate() == r1.getstate()
+            assert all(vr[k] == v for k, v in base.items())
+            assert [{k: v for k, v in r.items() if k != "value"} for r in rec0] == \
+                [{k: v for k, v in r.items() if k != "value"} for r in rec]
+            rolls = [r for r in rec if r["kind"] == 0]
+            expected = 0.0
+            for r in rolls[1:]:
+                owner, cube, jac = r["cube"]
+                q = ref.dice_values(r["state"], MatchState(CubeOwner(owner), cube, bool(jac)))
+                k = DICE.index(tuple(sorted(r["dice"])))
+                expected += (1 if r["state"].turn == 0 else -1) * cube * (q[k] - WEIGHTS @ q)
+            assert vr["n_corrected"] == len(rolls) - 1
+            assert vr["luck_white"] == pytest.approx(expected, abs=1e-11)
+
+
+def test_janowski_reference_and_cubeless_rejected(cubeful_engines, jan_engine):
+    a, _, ref = cubeful_engines
+    with pytest.raises(ValueError, match="matching cubeful"):
+        P.play_game(a, a, P.game_opts(cubeful=True), 1, reference=jan_engine)
+    with pytest.raises(ValueError, match="matching cubeful"):
+        P.play_game(a, jan_engine, P.game_opts(cubeful=False), 1, reference=ref)
+
+
+@pytest.mark.parametrize("field,value", [("dice", "independent"),
+                                         ("janowski", {"sides": [False, True], "rev": "r",
+                                                       "x": 0.76, "board_sanity": True})])
+def test_pooling_refuses_other_dice_or_janowski(tmp_path, field, value):
+    meta = dict(schema=V.SCHEMA, side1_sha256="a", side2_sha256="b", reference_sha256="r",
+                backend="simd", game_mode="cubeful-money", seed=3)
+
+    def save(name, metadata, start):
+        p = tmp_path / name
+        np.savez(p, **fake_data(4), metadata=json.dumps(metadata), pair_id=np.arange(start, start+4))
+        return p
+
+    p1 = save("old.npz", meta, 0)                       # before the field: paired, no Prob5Jan
+    p2 = save("default.npz", {**meta, "dice": "paired", "janowski": None}, 4)
+    assert len(V.load_runs([p1, p2])[0]["raw"]) == 8
+    p3 = save("other.npz", {**meta, field: value}, 8)
+    with pytest.raises(ValueError, match="different models"):
+        V.load_runs([p1, p3])
+
+
+def test_cli_janowski_side_independent_dice(tmp_path, capsys, monkeypatch):
+    if not PROB5_4L.exists():
+        pytest.skip("prob5 checkpoint missing")
+    monkeypatch.delenv("JANOWSKI_X", raising=False)
+    out = tmp_path / "jan.npz"
+    V.main(["--game-mode", "cubeful-money", "--side1", str(V.DEFAULT_CF_3L),
+            "--side2", f"janowski:{PROB5_4L}", "--reference", str(V.DEFAULT_CF_3L),
+            "--pairs", "3", "--workers", "1", "--chunk-pairs", "2", "--seed", "4",
+            "--dice", "independent", "--out", str(out)])
+    meta = json.loads(out.with_suffix(".json").read_text())["metadata"]
+    assert meta["dice"] == "independent"
+    assert meta["side2"] == f"janowski:{PROB5_4L.resolve()}"
+    from janowski_agent import JANOWSKI_REV
+    assert meta["janowski"] == {"sides": [False, True], "rev": JANOWSKI_REV, "x": 0.76,
+                                "board_sanity": True}
+    assert "c_api/puretd_janowski.c" in meta["source_sha256"]
+    data, _ = V.load_runs([out])
+    assert data["raw"].shape == (3, 2) and np.all(data["corrected"] > 0)
+    with pytest.raises(SystemExit):
+        V.main(["--side2", f"janowski:{PROB5_4L}", "--pairs", "2",
+                "--out", str(tmp_path / "cubeless.npz")])
+    assert "cubeful money only" in capsys.readouterr().err

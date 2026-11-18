@@ -1,18 +1,18 @@
 # PureTD: Self-Play Reinforcement Learning for Backgammon
 
-A backgammon AI trained entirely through self-play [reinforcement learning](https://en.wikipedia.org/wiki/Reinforcement_learning). The core method is temporal-difference learning with a neural network over Tesauro's original feature encoding ([TD-Gammon](https://en.wikipedia.org/wiki/TD-Gammon)). Besides sampled Bellman backups, the trainer implements exact Bellman backups (1-ply backups), a step towards AlphaZero-style targets. Training runs multiprocess and on the GPU. Supported games: 1-point matches (DMP) and money games; match play is planned (partial work on the experimental `matchplay` branch).
+A backgammon AI trained entirely through self-play [reinforcement learning](https://en.wikipedia.org/wiki/Reinforcement_learning). The core method is temporal-difference learning with a neural network over Tesauro's original feature encoding ([TD-Gammon](https://en.wikipedia.org/wiki/TD-Gammon)). Besides sampled Bellman backups, the trainer implements exact Bellman backups (expected backups). Training uses Python multiprocessing: self-play runs in parallel worker processes, the update step in the main process, optionally on a GPU. Supported games: 1-point matches (DMP) and money games; match play is planned and actively being worked on.
 
-**Key results:** A 563k-parameter network scores +36.7 mEq/game against gnubg 1-ply¹ (400k luck-adjusted games, 95% CI [+36.0, +37.5]) in cubeful money games. XG++ analysis of 1000 self-play games gives this model a Performance Rating (PR) of 0.72 (95% CI [0.68, 0.76]).
+**Key results:** A 563k-parameter network scores +36.6 mEq/game against gnubg 1-ply¹ (400k luck-adjusted games, 95% CI [+35.7, +37.4]) in cubeful money games. XG++ analysis of 1000 self-play games gives this model a Performance Rating (PR) of 0.72 (95% CI [0.68, 0.76]).
 
 Two findings:
 1. For money games, simple RL techniques produce a base model nearly as good as or better than gnubg's base model.
-2. Cube action for money games can be learned by RL by adding the cube actions (offer double, take, drop) to the agent's action set and learning from self-play as usual. No take-point formulas are used. The same approach is expected to work for match play; that is future work.
+2. Cube action for money games can be learned by RL by adding the cube actions (offer double, take, drop) to the agent's action set and learning from self-play as usual. No take-point formulas are used. The same approach for match play is in progress.
 
 To our knowledge this is the first open-source backgammon AI trained entirely through self-play RL, with the complete training pipeline included, to reach near-SOTA 0-ply strength in DMP and cubeful money games, and the first open-source implementation to learn cube action directly through self-play RL. The approach is the one described, but not evaluated for money games, by [Andrew Lin](https://ieeexplore.ieee.org/document/9382451/).
 
 [BGBlitz](https://bgblitz.com/) is a closed-source backgammon AI trained with pure RL that is competitive with or ahead of gnubg ([technical presentation](https://bgblitz.com/download/blog/Aachen_BGBlitz.pdf)).
 
-`best_models/experimental/` holds larger cubeful and prob5 models that evaluate better but run slower. The experimental `matchplay` branch holds code and preliminary models for a match-play agent that, like the money-game models, uses no Janowski formulas for cube action and cubeful play.
+`best_models/experimental/` holds larger cubeful and prob5 models that evaluate better but run slower.
 
 ## Current Models and Results
 
@@ -20,7 +20,6 @@ To our knowledge this is the first open-source backgammon AI trained entirely th
 |-------|------|--------|-------------|--------|----------------|-----------------|-----|------|
 | Best 4L cubeful | cubeful-money | equity | [512,512,256,256] | 563k | **+94.1 mEq/game** [+93.3, +94.9] | **0.72** [0.68, 0.76] | `4e25e4f7` | `best_models/cubeful_money_512_512_256_256.pt` |
 | Wide 5L cubeful | cubeful-money | equity | [768,768,256,256,256] | 1,074k | **+106.8 mEq/game** [+105.5, +108.0] | — | `16039ea7` | `best_models/experimental/cubeful_money_768_768_256_256_256.pt` |
-| Best 3L cubeful | cubeful-money | equity | [512,512,256] | 497k | **+54.1 mEq/game** [+53.0, +55.3] | — | `799f8c75` | `best_models/cubeful_money_512_512_256.pt` |
 | 4L cubeless prob5 | cubeless-money | prob5 | [512,512,256,256] | 562k | **+48.5 mEq/game** [+48.1, +48.8] | — | `88b03c1c` | `best_models/cubeless_prob5_512_512_256_256.pt` |
 | Wide 5L cubeless prob5 | cubeless-money | prob5 | [768,768,256,256,256] | 1,072k | **+55.6 mEq/game** [+55.1, +56.1] | — | `b8d4306c` | `best_models/experimental/cubeless_prob5_768_768_256_256_256.pt` |
 
@@ -49,7 +48,7 @@ target = E_dice[max_move(1 - V(next))]  # lower variance: all 21 dice
 
 This removes the dice variance from the training signal. Terminal states take their exact value (0/1) instead of the network estimate.
 
-The 1-ply value iteration was inspired by and validated against the "1-ply amplified equity estimate" of [jacobhilton/backgammon](https://github.com/jacobhilton/backgammon). In target quality and cost it sits between TD-Gammon (sampled backups) and AlphaZero (deep search).
+The 1-ply value iteration follows the "1-ply amplified equity estimate" of [jacobhilton/backgammon](https://github.com/jacobhilton/backgammon). In target quality and cost it sits between TD-Gammon (sampled backups) and AlphaZero (deep search).
 
 Sampled backups (0-ply) are ~5x faster and build a strong base model. Exact backups (1-ply) are slower; initialised from 0-ply-trained weights they usually improve it.
 
@@ -57,16 +56,16 @@ Sampled backups (0-ply) are ~5x faster and build a strong base model. Exact back
 
 Money-game models output equity (+1 for winning one point, -1 for losing one). Undoubled gammons and backgammons are worth +2/+3.
 
-Cubeful play adds 4 binary inputs: cube_centered, cube_own and cube_opponent_own form a one-hot of cube ownership; is_cube_action is 1 for a cube decision and 0 for a checker decision. Cube decisions are ordinary state-action-next_state transitions trained with bootstrapped targets.
+Cubeful play adds 4 binary inputs: cube_centered, cube_own and cube_opponent_own form a one-hot of cube ownership: is_cube_action is 1 for a cube decision and 0 for a checker decision. Cube decisions are ordinary state-action-next_state transitions trained with bootstrapped targets.
 
-The network predicts the expected equity for the current cube ownership and board, with the cube value normalised to 1; the equity of a position is the model output times the cube value. Andrew Lin (above) describes a similar normalisation, with published results only on small match-play networks that neither treat cube decisions as state-action transitions nor use an is_cube_action input.
+The network predicts the expected equity for the current cube ownership and board, with the cube value normalised to 1 (the equity of a position is the model output times the cube value). Andrew Lin (above) describes a similar normalisation, with published results only on match-play networks that neither treat cube decisions as state-action transitions nor use an is_cube_action input.
 
 ## Quick Start
 
 ### Requirements
 
-- Python 3.10–3.13 (gnubg-nn has no wheels for newer interpreters)
-- PyTorch + NumPy (+ gnubg-nn for evaluation vs GNU Backgammon), pinned in `requirements.txt`
+- Python 3.10–3.13 (the optional gnubg-nn has no wheels for newer interpreters)
+- PyTorch + NumPy, pinned in `requirements.txt`. Optional, for third-party sides only: gnubg-nn (GPL-3.0) for `gnubg-nn` sides, bgsage (MPL-2.0) for Open Sage sides
 - GCC (optional): builds the C engine (~20x faster training) and the C API (`c_api/`) that training and `play_models.py` use by default, on demand at first use. Without it they run the Python path after a NOTE; `--python-api` selects that path.
 - GNU Backgammon 1.08.003 for the `gnubg-ext` opponent: install per [`experiments/head_to_head/README.md`](experiments/head_to_head/README.md)
 
@@ -253,7 +252,7 @@ Paper tables → code, commands and results: [EXPERIMENTS.md](EXPERIMENTS.md)
 
 ## TODO
 
-- Extend to match play (work in progress on branch `matchplay`)
+- Extend to match play (in progress)
 - Replace 1-ply targets with deeper lookahead (AlphaZero-style MCTS or Jacob Hilton's "amplified" equity estimator)
 - Evaluate the models inside a full engine with expectimax search
 
@@ -266,13 +265,13 @@ Inspired by and references:
 - [jacobhilton/backgammon](https://github.com/jacobhilton/backgammon): 1-ply value iteration, OCaml implementation with experience replay
 - [carsten-wenderdel/wildbg](https://github.com/carsten-wenderdel/wildbg): supervised-learning settings, topology and approaches, and extended discussions
 - Gerry Tesauro's TD-Gammon and related work
-- GNU Backgammon, in particular as the baseline to compare against
-- The Janowski cube layer (`janowski.py`) implements R. Janowski, "Take-Points in Money Games" (1993), with GNU Backgammon 1.08 as the reference implementation
+- [GNU Backgammon](https://www.gnu.org/software/gnubg/): the baseline opponent and benchmark (its 1.08.003 binary, driven over the external-player socket; `benchpool.patch` adds a timing loop to it); the cubeless benchmark pool comes from gnubg-nn (GNU Backgammon's nets) 0-ply self-play; ply depths follow its numbering
+- The Janowski cube layer (`janowski.py`) implements R. Janowski's cube-life model, "Take-Points in Money Games" (1993), in GNU Backgammon's piecewise-linear formulation
 
 ## License
 
-MIT ([LICENSE](LICENSE)), except [third_party_opponents/gnubg/gnubg_bench/benchpool.patch](third_party_opponents/gnubg/gnubg_bench/benchpool.patch), which modifies GNU Backgammon and is GPL-3.0-or-later (see its header).
+MIT ([LICENSE](LICENSE)), except [third_party_opponents/gnubg/gnubg_bench/benchpool.patch](third_party_opponents/gnubg/gnubg_bench/benchpool.patch) (GPL-3.0-or-later; it modifies GNU Backgammon; licence text in [COPYING](third_party_opponents/gnubg/gnubg_bench/COPYING) beside it) and [third_party_opponents/opensage/opensage_bench/sage_bench.cpp](third_party_opponents/opensage/opensage_bench/sage_bench.cpp) and [sage_filt_check.cpp](third_party_opponents/opensage/opensage_bench/sage_filt_check.cpp) (MPL-2.0; adapted from Open Sage). The optional opponents are installed separately under their own licences: GNU Backgammon (GPL-3.0-or-later), gnubg-nn (GPL-3.0), Open Sage (MPL-2.0) and HedgeHog (MIT; its models are for non-commercial use only); see [third_party_opponents/README.md](third_party_opponents/README.md). Training, play and the C API need no third-party opponent; without them only this repository's MIT licence (and the two BSD-3-Clause notices named in the next sentence) applies. `c_api/puretd.c` contains MT19937 code (Matsumoto and Nishimura) and `cuda_graph_step.py` contains Adam-step code from PyTorch, each under the BSD-3-Clause notice in that file.
 
 ---
 
-¹ GNU Backgammon 1.08.003 (neural-net weights `gnubg.wd`, md5 `14184acc9c60ef67be0fad88548fd51a`), played over its external-player socket as shipped: pruning nets on, Normal move filter (`gnubg-ext`), native money cube (Jacoby). Against unpruned gnubg 1-ply (`gnubg-ext-full`) the edge is +27.8 [+25.9, +29.6], statistically indistinguishable.
+¹ GNU Backgammon 1.08.003 at its default settings (`gnubg-ext`). Per-game equity is capped at ±128, as in every head-to-head here.

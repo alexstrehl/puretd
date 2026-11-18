@@ -1,5 +1,6 @@
-"""Luck-adjusted money-game head-to-head: paired dice plus a fixed
-reference net's per-roll luck correction.
+"""Luck-adjusted money-game head-to-head: a fixed reference net's
+per-roll luck correction, on paired dice (default) or independent dice
+(--dice independent: each game its own dice stream).
 
 Each game is played twice on identical dice, with and without the
 correction, and both paths are timed. The replay checks that the
@@ -46,11 +47,32 @@ def pair_seed(seed, pair_id):
         f"{SEED_NAMESPACE}:{seed}:{pair_id}".encode("ascii")).digest()[:8], "little")
 
 
+def leg_seed(seed, pair_id, leg, dice="paired"):
+    """Dice seed of one game of a pair: the pair's seed for both legs
+    (paired), or one per leg (independent)."""
+    if dice == "paired":
+        return pair_seed(seed, pair_id)
+    if dice != "independent":
+        raise ValueError(f"dice must be paired or independent (got {dice!r})")
+    return int.from_bytes(hashlib.sha256(
+        f"{SEED_NAMESPACE}:{seed}:{pair_id}:{leg}".encode("ascii")).digest()[:8], "little")
+
+
+def split_side(spec):
+    """(path, is_janowski) of a side spec: ``janowski:<prob5.pt>`` is
+    Prob5Jan (cubeful money)."""
+    if isinstance(spec, str) and spec.startswith("janowski:"):
+        return spec.split(":", 1)[1], True
+    return spec, False
+
+
 def _init_worker(paths, backend, every, cubeful=False, jacoby=True, gnubg_plies=0,
-                 native_plies=(0, 0), root_filter=0.0):
+                 native_plies=(0, 0), root_filter=0.0, janowski=(False, False),
+                 jan_opts=(None, True), dice="paired"):
     """`native_plies`: the search depth (0 or 1) of each native player.
     `root_filter`: their 1-ply root filter (PURETD_ROOT_FILTER), as on
-    run.py's C API path. The reference is never filtered."""
+    run.py's C API path. The reference is never filtered. `janowski`:
+    which players are Prob5Jan, at `jan_opts` (x, board_sanity)."""
     global _ENGINES, _EXTERNAL_RUNNER
     from experiments.head_to_head.variance_external import GNUBG_SIDES, ExternalRunner
     _EXTERNAL_RUNNER = None
@@ -59,17 +81,20 @@ def _init_worker(paths, backend, every, cubeful=False, jacoby=True, gnubg_plies=
                                           native_plies, root_filter)
         return
     from c_api.puretd_py import Engine
-    engines = [Engine(p, backend=backend) for p in paths]
-    for e in engines[:2]:
-        e.set_root_filter(root_filter)
-    _ENGINES = (*engines, every, cubeful, jacoby, tuple(native_plies))
+    jan = tuple(janowski) + (False,)
+    engines = [Engine(p, backend=backend, janowski=j, x=jan_opts[0], board_sanity=jan_opts[1])
+               if j else Engine(p, backend=backend) for p, j in zip(paths, jan)]
+    for e, j in zip(engines[:2], jan):
+        if not j:
+            e.set_root_filter(root_filter)
+    _ENGINES = (*engines, every, cubeful, jacoby, tuple(native_plies), dice)
 
 
 def _chunk(args):
     if _EXTERNAL_RUNNER is not None:
         return _EXTERNAL_RUNNER.chunk(args, pair_seed)
     from c_api.puretd_py import Rng, game_opts, play_game
-    a, b, ref, every, cubeful, jacoby, native_plies = _ENGINES
+    a, b, ref, every, cubeful, jacoby, native_plies, dice = _ENGINES
     seed, start, count = args
     raw = np.empty((count, 2))
     luck = np.empty_like(raw)
@@ -88,7 +113,7 @@ def _chunk(args):
             outcomes, states = {}, {}
             # Alternate timing order to limit systematic warm-cache effects.
             for mode in ((0, 1) if (pid + leg) % 2 == 0 else (1, 0)):
-                rng = Rng(pair_seed(seed, pid), a.backend)
+                rng = Rng(leg_seed(seed, pid, leg, dice), a.backend)
                 t0, c0 = time.perf_counter(), time.process_time()
                 res, _ = play_game(white, black, opts, rng,
                                    reference=ref if mode else None, vr_every=every)
@@ -192,9 +217,9 @@ def load_runs(paths):
                 "backend", "backend_description", "every", "opening_correction",
                 "game_mode", "jacoby", "plies", "engine_sha256", "bf16", "expand_dedup",
                 "play_path", "external", "cpu_accounting", "cube_cap", "seed_namespace",
-                "root_filter")
+                "root_filter", "dice", "janowski")
     # An absent field reads as this value (runs saved before the field).
-    absent = {"root_filter": 0.0}
+    absent = {"root_filter": 0.0, "dice": "paired", "janowski": None}
     for path in paths:
         with np.load(path, allow_pickle=False) as saved:
             meta = json.loads(str(saved["metadata"]))
@@ -235,13 +260,19 @@ def _source_commit():
     marker = ROOT / "SOURCE_COMMIT"
     if marker.exists():
         return marker.read_text().strip()
-    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True,
+                                       stderr=subprocess.DEVNULL).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--side1", help="native model path or gnubg-ext[-full|-rootfull]; default: production 4L")
-    ap.add_argument("--side2", help="native model path or gnubg-ext[-full|-rootfull]; default: trained 3L")
+    ap.add_argument("--side1", help="native model path, janowski:<prob5.pt> (cubeful money) "
+                    "or gnubg-ext[-full|-rootfull]; default: production 4L")
+    ap.add_argument("--side2", help="native model path, janowski:<prob5.pt> (cubeful money) "
+                    "or gnubg-ext[-full|-rootfull]; default: trained 3L")
     ap.add_argument("--plies", type=int, default=0, help="GNU Backgammon depth (0..4)")
     ap.add_argument("--oneply1", action="store_true", help="native side1 plays at 1-ply")
     ap.add_argument("--oneply2", action="store_true", help="native side2 plays at 1-ply")
@@ -255,6 +286,9 @@ def main(argv=None):
     ap.add_argument("--chunk-pairs", type=int, default=50)
     ap.add_argument("--backend", default="simd", choices=("simd", "ref", "cblas", "torch"))
     ap.add_argument("--every", type=int, default=1, help="correct every Nth post-opening turn")
+    ap.add_argument("--dice", choices=("paired", "independent"), default="paired",
+                    help="paired: both games of a pair share one dice stream, seats "
+                         "swapped; independent: each game its own stream")
     ap.add_argument("--beta", type=float, default=1.0, help="fixed coefficient, never fitted here")
     ap.add_argument("--out", type=Path, help="new .npz path; JSON summary saved alongside")
     ap.add_argument("--summarize", nargs="+", type=Path, help="summarize compatible saved runs")
@@ -275,6 +309,24 @@ def main(argv=None):
     a.side1, a.side2, a.reference = a.side1 or str(default4), a.side2 or str(default3), a.reference or str(default4)
     from experiments.head_to_head.variance_external import GNUBG_SIDES, preflight
     has_external = any(p in GNUBG_SIDES for p in (a.side1, a.side2))
+    (a.side1, j1), (a.side2, j2) = split_side(a.side1), split_side(a.side2)
+    janowski = (j1, j2)
+    if any(janowski) and not cubeful:
+        ap.error("janowski: sides are cubeful money only")
+    if has_external and (any(janowski) or a.dice != "paired"):
+        ap.error("GNU Backgammon runs support native checkpoint sides and paired dice only")
+    jan_meta = None
+    if any(janowski):
+        from janowski import DEFAULT_X
+        from janowski_agent import JANOWSKI_REV
+        from prob_agent import board_sanity_from_env
+        x_env = os.environ.get("JANOWSKI_X", "")
+        jan_opts = (float(x_env) if x_env else DEFAULT_X,
+                    board_sanity_from_env("JANOWSKI_BOARD_SANITY", True))
+        jan_meta = dict(sides=list(janowski), rev=JANOWSKI_REV, x=jan_opts[0],
+                        board_sanity=jan_opts[1])
+    else:
+        jan_opts = (None, True)
     if a.reference in GNUBG_SIDES:
         ap.error("--reference must be a native money model; GNU Backgammon is supported as a player")
     if not 0 <= a.plies <= 4 or (a.plies and not has_external):
@@ -310,11 +362,14 @@ def main(argv=None):
     # Export once in the parent. Spawned workers need only NumPy and the C API.
     bins = [p if p in GNUBG_SIDES or p.endswith(".bin") else export_bin(p) for p in paths]
     with ExitStack() as stack:
-        engines = [Engine(p, a.backend) for p in bins if p not in GNUBG_SIDES]
+        jan = janowski + (False,)
+        engines = [Engine(p, a.backend, janowski=True, x=jan_opts[0], board_sanity=jan_opts[1])
+                   if j else Engine(p, a.backend)
+                   for p, j in zip(bins, jan) if p not in GNUBG_SIDES]
         for e in engines:
             stack.callback(e.close)
         kinds = (KIND_CUBEFUL,) if cubeful else (KIND_EQUITY, KIND_PROB5)
-        if any(e.kind not in kinds for e in engines):
+        if any(e.kind not in kinds for e, j in zip(engines, jan) if not j):
             ap.error("all native players and the reference must match the selected money-game mode")
         description = engines[-1].describe
     extra_sources = ("experiments/head_to_head/variance_external.py",
@@ -327,7 +382,7 @@ def main(argv=None):
         game_mode=a.game_mode, jacoby=a.jacoby if cubeful else None,
         cube_cap=None, root_filter=root_filter,
         plies=[a.plies if p in GNUBG_SIDES else n for p, n in zip(paths[:2], native_plies)],
-        seed=a.seed, seed_namespace=SEED_NAMESPACE,
+        seed=a.seed, seed_namespace=SEED_NAMESPACE, dice=a.dice, janowski=jan_meta,
         play_path="python-external-roll-hook" if has_external else "native-c",
         external=external,
         cpu_accounting="worker+per-mode-gnubg-proc-stat" if has_external else "worker-process",
@@ -338,12 +393,13 @@ def main(argv=None):
         git_commit=_source_commit(),
         source_sha256={p: _sha(ROOT / p) for p in
                        ("c_api/puretd.c", "c_api/puretd.h", "c_api/puretd_py.py",
-                        "experiments/head_to_head/variance.py") + extra_sources},
+                        "experiments/head_to_head/variance.py")
+                       + (("c_api/puretd_janowski.c",) if jan_meta else ()) + extra_sources},
         python=sys.version, numpy=np.__version__, torch=torch.__version__,
         platform=platform.platform(), hostname=platform.node(), argv=sys.argv,
     )
-    for name, path in zip(("side1", "side2", "reference"), paths):
-        meta[name] = path
+    for name, path, j in zip(("side1", "side2", "reference"), paths, jan):
+        meta[name] = f"janowski:{path}" if j else path
         meta[name + "_sha256"] = (hashlib.sha256(json.dumps(
             dict(spec=path, plies=a.plies, external=external), sort_keys=True).encode()).hexdigest()
             if path in GNUBG_SIDES else _sha(path))
@@ -353,11 +409,12 @@ def main(argv=None):
     started = time.perf_counter()
     last = started
     print(f"{a.pairs} pairs; {a.workers} workers; reference={Path(a.reference).name}; "
-          f"every={a.every}; plies={meta['plies']}", flush=True)
+          f"every={a.every}; plies={meta['plies']}; dice={a.dice}", flush=True)
     with ProcessPoolExecutor(max_workers=a.workers, mp_context=mp.get_context("spawn"),
                              initializer=_init_worker,
                              initargs=(bins, a.backend, a.every, cubeful, a.jacoby, a.plies,
-                                       native_plies, root_filter)) as pool:
+                                       native_plies, root_filter, janowski, jan_opts,
+                                       a.dice)) as pool:
         futures = [pool.submit(_chunk, task) for task in tasks]
         for f in as_completed(futures):
             start, data = f.result()

@@ -38,7 +38,6 @@ class TestSideModelMd5:
         p = _write_model(tmp_path / "m.pt", b"weights-A")
         assert side_model_md5(f"kind:{p}") == side_model_md5(p)
         assert side_model_md5(f"janowski:{p}") == side_model_md5(p)
-        assert side_model_md5(f"bo:{p}") == side_model_md5(p)
 
     def test_hh_shim_md5_recorded_with_hedgehog_side(self, tmp_path, monkeypatch):
         shim = _write_model(tmp_path / "libhhagent.so", b"shim-bytes")
@@ -114,7 +113,7 @@ class TestCombineSettingsGuard:
         return save_head_to_head(
             str(out), [1.0, -1.0, 2.0, float(self._n)],
             game_mode="cubeful-money",
-            side1=side1, side2="bo:x.pt", n_games=4, **kw)
+            side1=side1, side2="x.pt", n_games=4, **kw)
 
     def test_janowski_settings_refuse_to_pool(self, tmp_path, monkeypatch):
         out = tmp_path / "runs"
@@ -225,7 +224,7 @@ class TestCombineSettingsGuard:
                     if k.startswith("janowski_1ply") or k == "janowski_variant"]
 
     def _legacy(self, out, monkeypatch, fields, side1="janowski:p.pt",
-                side2="bo:x.pt", depth="1ply"):
+                side2="x.pt", depth="1ply"):
         """A run as written at JANOWSKI_REV 2026-10-06c: `fields` added
         (None drops one)."""
         TestCombineSettingsGuard._n += 1
@@ -237,7 +236,7 @@ class TestCombineSettingsGuard:
                               game_mode="cubeful-money", side1=side1,
                               side2=side2, n_games=2, **kw)
         d = {**dict(np.load(f)), "janowski_rev": "2026-10-06c",
-             "janowski_variant": "gnubg"}
+             "janowski_variant": "legacy"}
         for k, v in fields.items():
             if v is None:
                 d.pop(k, None)
@@ -245,52 +244,6 @@ class TestCombineSettingsGuard:
                 d[k] = v
         os.remove(f)
         np.savez(str(out / f"hh_legacy_{self._n}.npz"), **d)
-
-    @pytest.mark.parametrize("fields", [{"janowski_1ply_simp": "0"},
-                                        {"janowski_1ply_filter": "off"},
-                                        {"janowski_1ply_filter": "8,0.2"}])
-    def test_legacy_oneply_settings_guard_1ply_only(self, tmp_path,
-                                                    monkeypatch, fields):
-        """Runs below JANOWSKI_REV 2026-10-13 pool on their 1-ply settings
-        (absent = "1" / "8,0.16") at 1-ply only."""
-        dflt = {"janowski_1ply_simp": "1", "janowski_1ply_filter": "8,0.16"}
-        for depth, refuses in (("1ply", True), ("0ply", False)):
-            out = tmp_path / depth
-            out.mkdir()
-            self._legacy(out, monkeypatch, dflt, depth=depth)
-            self._legacy(out, monkeypatch, {**dflt, **fields}, depth=depth)
-            if refuses:
-                with pytest.raises(ValueError, match="janowski_1ply"):
-                    combine_head_to_head(str(out), n_bootstrap=50, do_print=False)
-            else:
-                r = combine_head_to_head(str(out), n_bootstrap=50, do_print=False)
-                assert r["total_games"] == 4
-
-    def test_legacy_oneply_settings_absent_read_as_default(self, tmp_path,
-                                                           monkeypatch):
-        absent = {"janowski_1ply_simp": None, "janowski_1ply_filter": None}
-        for other, pools in (({"janowski_1ply_simp": "1",
-                               "janowski_1ply_filter": "8,0.16"}, True),
-                             ({"janowski_1ply_simp": "0"}, False)):
-            out = tmp_path / f"r{len(other)}"
-            out.mkdir()
-            self._legacy(out, monkeypatch, absent)
-            self._legacy(out, monkeypatch, other)
-            if pools:
-                r = combine_head_to_head(str(out), n_bootstrap=50, do_print=False)
-                assert r["total_games"] == 4
-            else:
-                with pytest.raises(ValueError, match="janowski_1ply_simp"):
-                    combine_head_to_head(str(out), n_bootstrap=50, do_print=False)
-
-    def test_legacy_oneply_settings_guard_side2(self, tmp_path, monkeypatch):
-        out = tmp_path / "runs"
-        out.mkdir()
-        for simp in ("1", "0"):
-            self._legacy(out, monkeypatch, {"janowski_1ply_simp": simp},
-                         side1="bo:c.pt", side2="janowski:p.pt")
-        with pytest.raises(ValueError, match="janowski_1ply_simp"):
-            combine_head_to_head(str(out), n_bootstrap=50, do_print=False)
 
     def test_legacy_runs_do_not_pool_with_current(self, tmp_path, monkeypatch):
         out = tmp_path / "runs"
@@ -369,13 +322,13 @@ class TestBoardSanityProvenance:
         """Prob5Jan runs of the same janowski_rev from before the field
         (sanity on) pool with default runs, not with JANOWSKI_BOARD_SANITY=0."""
         f = self._save(tmp_path / "a", "janowski:p.pt", monkeypatch,
-                       side2="bo:c.pt")
+                       side2="c.pt")
         assert str(np.load(f)["janowski_board_sanity"]) == "1"
         for env, pools in (({}, True), ({"JANOWSKI_BOARD_SANITY": "0"}, False)):
             out = tmp_path / f"j{len(env)}"
-            self._save(out, "janowski:p.pt", monkeypatch, side2="bo:c.pt",
+            self._save(out, "janowski:p.pt", monkeypatch, side2="c.pt",
                        strip="janowski_board_sanity")
-            self._save(out, "janowski:p.pt", monkeypatch, env, side2="bo:c.pt")
+            self._save(out, "janowski:p.pt", monkeypatch, env, side2="c.pt")
             if pools:
                 assert self._combine(out)["total_games"] == 6
             else:
@@ -384,7 +337,6 @@ class TestBoardSanityProvenance:
 
     def test_preflight_rejects_bad_values(self, tmp_path, monkeypatch):
         from play_models import preflight_side
-        monkeypatch.setenv("JANOWSKI_NO_BEAROFF", "1")
         monkeypatch.setenv("PROB5_BOARD_SANITY", "on")
         with pytest.raises(ValueError, match="PROB5_BOARD_SANITY"):
             preflight_side(self._prob5(tmp_path), "model")
@@ -402,7 +354,6 @@ class TestBoardSanityProvenance:
         monkeypatch.setenv("PROB5_BOARD_SANITY", "1")
         assert _build_side(p5, "model", **kw).board_sanity is True
         kw.update(cubeless_money=False, cubeful=True)
-        monkeypatch.setenv("JANOWSKI_NO_BEAROFF", "1")
         jan = "janowski:" + p5
         assert _build_side(jan, "janowski", **kw).board_sanity is True
         monkeypatch.setenv("JANOWSKI_BOARD_SANITY", "0")
@@ -430,11 +381,6 @@ class TestCliSaveRecordsSettings:
 
     def test_jacoby_recorded_and_guarded(self, tmp_path):
         import glob
-        import bearoff
-        import os
-        if not (os.path.exists(bearoff.DEFAULT_TABLE)
-                and os.path.exists(bearoff.DEFAULT_TS_TABLE)):
-            pytest.skip("bearoff tables not built")
         from model import ProbNetwork
         model = str(tmp_path / "p.pt")
         ProbNetwork(hidden_sizes=[8]).save(model)
@@ -456,55 +402,11 @@ class TestCliSaveRecordsSettings:
                                  do_print=False)
 
 
-class TestBearoffPreflight:
-    """janowski:/bo: sides need both bearoff tables; a missing or stale
-    table fails before any game, with the build command."""
-
-    def test_preflight_side(self, tmp_path, monkeypatch):
-        import bearoff
-        from play_models import preflight_side
-        monkeypatch.setattr(bearoff, "_TABLE", None)
-        monkeypatch.setattr(bearoff, "DEFAULT_TABLE", str(tmp_path / "no.npz"))
-        for side, kind in (("janowski:p.pt", "janowski"), ("bo:c.pt", "bo")):
-            with pytest.raises(FileNotFoundError, match="build_table"):
-                preflight_side(side, kind)
-        monkeypatch.setenv("JANOWSKI_NO_BEAROFF", "1")
-        preflight_side("janowski:p.pt", "janowski")
-        preflight_side("random", "random")
-
-    def test_stale_ts_table(self, tmp_path, monkeypatch):
-        import bearoff
-        stale = tmp_path / "ts6.npz"
-        np.savez(stale, counts=np.zeros((1, 6), np.int64), P=np.zeros((1, 1)),
-                 V=np.zeros((1, 1, 3)), ts_max=np.int64(6))
-        monkeypatch.setattr(bearoff, "_TS", None)
-        with pytest.raises(ValueError, match="build_ts_table"):
-            bearoff.load_ts_table(str(stale))
-
-    def test_run_py_fails_before_games(self, tmp_path):
-        import os
-        import subprocess
-        import sys
-        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        r = subprocess.run(
-            [sys.executable, os.path.join(repo, "experiments", "head_to_head",
-                                          "run.py"),
-             "--side1", "janowski:x.pt", "--side2", "random",
-             "--game-mode", "cubeful-money", "--games", "2",
-             "--save", str(tmp_path / "runs")],
-            capture_output=True, text=True, cwd=repo, timeout=300,
-            env={**os.environ, "CUDA_VISIBLE_DEVICES": "",
-                 "BG_BEAROFF_TABLE": str(tmp_path / "missing.npz")})
-        assert r.returncode != 0
-        assert "build_table" in r.stderr, r.stderr[-2000:]
-        assert not (tmp_path / "runs").exists()
-
-
 @pytest.mark.parametrize("spec,kind", [("janowski:p.pt", "janowski"),
-                                       ("bo:c.pt", "bo")])
-def test_janowski_bo_refuse_twoply(spec, kind):
-    """janowski:/bo: play 0-ply or 1-ply; twoply_k is refused, not
-    silently ignored."""
+                                       ("janowski-c:p.pt", "janowski-c")])
+def test_janowski_refuse_twoply(spec, kind):
+    """janowski: plays 0-ply or 1-ply; twoply_k is refused, not silently
+    ignored."""
     from play_models import _build_side, preflight_side
     with pytest.raises(ValueError, match="0-ply and 1-ply only"):
         preflight_side(spec, kind, twoply_k=1)
@@ -514,7 +416,7 @@ def test_janowski_bo_refuse_twoply(spec, kind):
 
 
 class TestPlaySidesCpuOnly:
-    """prob5, janowski: and bo: play sides refuse any GPU request."""
+    """prob5 and janowski: play sides refuse any GPU request."""
 
     @staticmethod
     def _gpu_net(net):
@@ -541,9 +443,3 @@ class TestPlaySidesCpuOnly:
         from janowski_agent import JanowskiAgent
         self._check(JanowskiAgent, ProbNetwork(hidden_sizes=[8]))
 
-    def test_bo(self):
-        from model import TDNetwork
-        from bearoff_td import BearoffTDAgent
-        self._check(BearoffTDAgent, TDNetwork(
-            hidden_sizes=[8], encoder_name="cubeful_perspective196",
-            output_mode="equity"))

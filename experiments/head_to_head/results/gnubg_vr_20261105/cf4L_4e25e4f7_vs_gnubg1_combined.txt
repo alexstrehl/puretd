@@ -1,0 +1,34 @@
+Pooled 4 run(s) -> 400000 games (cf_cycle6.pt vs gnubg-ext, cubeful-money, paired dice: 200000 pairs, luck-adjusted)
+
+============================================================
+RESULTS  (paired dice: 200000 pairs, CIs bootstrap over pairs)
+============================================================
+Model1: 201417 wins (50.4%)
+Model2: 198583 wins (49.6%)
+
+Model1 win rate 95% CI (pair bootstrap): [50.2%, 50.5%]
+p-value: 0.0000
+Verdict: Model1 is significantly stronger (p<0.05)
+
+Cubeful money equity (Model1), UNCAPPED mean: +0.0350 pts/game (+35.0 mEq/game)
+  95% CI (bootstrap): [+26.3, +43.6] mEq/game (±8.7)
+  Equity p-value (bootstrap): 0.0000
+  Equity verdict: Model1 significantly stronger (p<0.05)
+  Median equity:   +1000.0 mEq/game  [+1000.0, +1000.0]  p=0.0000
+  Trimmed mean (1%): +36.3 mEq/game  [+28.0, +44.4]  p=0.0000
+  Capped mean (±128): +35.3 mEq/game  [+26.7, +43.9]  p=0.0000
+
+  Luck-adjusted (reference cubeful_money_512_512_256_256.pt, md5 6afda0f8, beta 1):
+    Raw:             +35.0 mEq/game  [+26.3, +43.6]
+    Luck-adjusted:   +36.3 mEq/game  [+34.9, +37.4]  p=0.0000
+    Variance factor: 51.40 (raw / adjusted pair variance)
+    Raw (capped ±128):             +35.3 mEq/game  [+26.7, +43.9]
+    Luck-adjusted (capped ±128):   +36.6 mEq/game  [+35.7, +37.4]  p=0.0000
+    Variance factor (capped ±128): 108.03 (raw / adjusted pair variance)
+    Luck centering z: pair -0.28, legs -0.91, +0.53 (|z| far above 3 indicates a bug)
+
+  Paired-dice gain (sample variances; 1.00 = no gain):
+    win_rate     one pair ~  2.65 independent games  (variance factor 1.32)
+    equity       one pair ~  2.30 independent games  (variance factor 1.15)
+    capped_mean  one pair ~  2.30 independent games  (variance factor 1.15)
+============================================================

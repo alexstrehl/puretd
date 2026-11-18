@@ -14,12 +14,12 @@ Neither side uses a bearoff database.
 ## Commands
 
 ```bash
-P5=best_models/cubeless_prob5_512_512_256_256.pt
-C4=best_models/cubeful_money_512_512_256_256.pt
+P5=best_models/history/cubeless_prob5_512_512_256_256_ac95a983.pt
+C4=best_models/history/cubeful_money_512_512_256_256_6afda0f8.pt
 HH=third_party_opponents/hedgehog
 
-# cubeless: fox 0-ply (aureus: the other file; 1-ply rows, cubeless and
-# cubeful: --oneply2 --games 4000000)
+# cubeless: fox 0-ply (aureus: the other file; fox 1-ply: --oneply2
+# --games 4000000)
 python experiments/head_to_head/run.py \
   --side1 $P5 --side2 hedgehog:$HH/fox_v0.34_2026-09-26.ogxf \
   --c-api --c-api-backend simd \
@@ -60,4 +60,3 @@ Cube capped at 64 for both sides (`--cube-cap 64`),
 |---|---:|---:|---|---:|
 | fox 0-ply | 10M | +68.5 | [+66.7, +70.4] | 52.6% |
 | aureus 0-ply | 10M | +47.8 | [+46.0, +49.7] | 53.2% |
-| fox 1-ply | 4M | +18.0 | [+15.2, +21.1] | 51.4% |

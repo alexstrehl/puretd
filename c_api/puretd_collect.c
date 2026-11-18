@@ -321,7 +321,6 @@ long bgc_collect(bgc_engine *e, const bgc_collect_opts *o, unsigned long long se
     if (kind != BGC_KIND_PROB && kind != BGC_KIND_EQUITY && kind != BGC_KIND_CUBEFUL
         && kind != BGC_KIND_PROB5)
         return -1;
-    if (kind == BGC_KIND_CUBEFUL && bgc_i_cubeful_bearoff(e)) return -1;  /* TDAgent's samples only */
     const bgc_encoder *en = bgc_i_encoder(e);
     if (!en->collect) {
         fprintf(stderr, "bgc_collect: encoder %s: no C collector (encoder table: "

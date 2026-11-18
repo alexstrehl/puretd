@@ -1,0 +1,18 @@
+# Open Sage full-pool agreement, 2026-11-13. bgsage 2.0.20260907; libsage_bench.so (c41f4f39) and
+# libbgsage_mobile.so built by one compiler (gcc, glibc 2.43) from the pinned tag; Threadripper 9980X,
+# one pinned core per worker. Rows marked (rerun) were rerun with 8 workers: under 16-24 workers,
+# 20 / 18 1-ply checker items ran past the C API's 1 s budget and were not compared.
+
+## sage_pick_check.py: SageBench loops vs the paths they replace
+0-ply checker  vs C API                         items  10000  agree  10000  over 1 s budget   0  differ   0
+0-ply cube     vs C API                         items   6000  agree   6000  over 1 s budget   0  differ   0
+0-ply cubeless vs best_move_index + bearoff DB  items   8000  agree   8000  over 1 s budget   0  differ   0
+1-ply checker  vs C API                         items  10000  agree  10000  over 1 s budget   0  differ   0  (rerun)
+1-ply cube     vs C API                         items   6000  agree   6000  over 1 s budget   0  differ   0
+1-ply cubeless vs best_move_index + bearoff DB  items   8000  agree   8000  over 1 s budget   0  differ   0
+
+## sage_capi_vs_analyzer.py: C API (opensage-native) vs BgBotAnalyzer (opensage-analyzer), cubeful money
+0-ply checker   items  10000  agree  10000  over 1 s budget   0  differ   0
+0-ply cube      items   6000  agree   6000  over 1 s budget   0  differ   0
+1-ply checker   items  10000  agree  10000  over 1 s budget   0  differ   0  (rerun)
+1-ply cube      items   6000  agree   6000  over 1 s budget   0  differ   0

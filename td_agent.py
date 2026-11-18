@@ -134,9 +134,9 @@ class TDAgent(Agent):
                 device is CPU. False = Python engine.
             oneply: 1-ply lookahead for chequer moves and cube
                 decisions.
-            twoply_k: > 0 = 2-ply chequer selection (gnubg's
-                convention: two dice+move expansions before the static
-                eval), cubeful or cubeless. At the depth-2 expansion
+            twoply_k: > 0 = 2-ply chequer selection (two dice+move
+                expansions before the static eval, the depth gnubg
+                calls 2-ply), cubeful or cubeless. At the depth-2 expansion
                 only the top k candidates (ranked by 0-ply value) are
                 deepened. Root candidates are always fully expanded.
                 Takes precedence over `oneply` for chequer choice.
@@ -743,8 +743,8 @@ class TDAgent(Agent):
         self, state: BoardState, k: int = 3,
     ) -> float:
         """2-ply estimate of V(state) at a cubeless chequer decision
-        (gnubg's convention: two dice+move expansions before the static
-        eval). From the mover's view:
+        (two dice+move expansions before the static eval, the depth gnubg
+        calls 2-ply). From the mover's view:
             E_{D1}[ max_{m1} ( flip( E_{D2}[ max_{m2}( flip( V(s2) ) ) ] ) ) ]
 
         Depth-1 candidates are ranked by 0-ply value and only the top-K

@@ -1,0 +1,4 @@
+# commit c41f4f39 (row: Open Sage 1-ply filtered, caches kept)  BENCH_CORE=2  BENCH_WARMUP_S=5  lib md5 2bf17752  date 2026-11-13T07:25:31Z
+[cubeful pool] loaded 10000 checker pts, 6000 cube pts from the committed artifact
+[cubeful pool] timing 10000 checker, 6000 cube points
+Open Sage 1-ply filtered   checker    1185.2 dec/s 95%CI [1152.7,1218.9] (0.844 ms)

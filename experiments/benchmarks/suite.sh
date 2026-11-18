@@ -6,8 +6,7 @@
 #   fast  bench.sh TIER=fast (every 0-ply row, gnubg 1-ply, Open Sage 1-ply
 #         cubeless), the HedgeHog 0-ply rows and the network-size ladder
 #         (capacity_costbench.py)
-#   slow  bench.sh TIER=slow (every other 1-ply row, gnubg 2-ply) and the
-#         HedgeHog 1-ply rows
+#   slow  bench.sh TIER=slow (every other 1-ply row, gnubg 2-ply)
 # Every row is a fixed-pool row.
 #
 # One sweep = every job of the group once, back to back; SWEEP_GAP idle
@@ -111,16 +110,13 @@ job_hh0(){ want hh || return 0; run_job "fast_hh0_s$1" "$OUT/fast/hh0_sweep$1.tx
   "nat $B/fixedpool_bench.py --mode cubeful --engines puretdc,hh-fox0,hh-aureus0 --backends $CAPI_LIST $FPC"; }
 job_cap(){ want cap || return 0; run_job "fast_cap_s$1" "$OUT/fast/capacity_sweep$1.txt" "" multi \
   "nat $B/capacity_costbench.py --models all --backends $CAPI_LIST $FPC"; }
-job_hh1(){ want hh || return 0; run_job "slow_hh1_s$1" "$OUT/slow/hh1_sweep$1.txt" "" multi \
-  "nat $B/fixedpool_bench.py --mode cubeless --configs hh-fox-1ply,hh-aureus-1ply $FPC" \
-  "nat $B/fixedpool_bench.py --mode cubeful --engines hh-fox1,hh-aureus1 $FPC"; }
 
 # The gap follows a sweep that ran; a resume skips finished sweeps without it.
 group_fast(){ for i in $(seq 1 "$NS"); do mkdir -p "$OUT/fast"; RAN=0
   job_bench fast "$i"; job_hh0 "$i"; job_cap "$i"
   [ "$i" -lt "$NS" ] && [ "$RAN" = 1 ] && sleep "$GAP"; done; }
 group_slow(){ for i in $(seq 1 "$NS"); do mkdir -p "$OUT/slow"; RAN=0
-  job_bench slow "$i"; job_hh1 "$i"
+  job_bench slow "$i"
   [ "$i" -lt "$NS" ] && [ "$RAN" = 1 ] && sleep "$GAP"; done; }
 
 log "SUITE start core=$BENCH_CORE warmup=$BENCH_WARMUP_S sweeps=$NS gap=$GAP groups='$GROUPS_' rows='$ROWS' smoke=${SMOKE:-0} shim=$SHIM_STATE venv=$VENV"

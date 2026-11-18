@@ -1,9 +1,8 @@
-"""Janowski cube layer (janowski.py, janowski_agent.py, bearoff_td.py).
+"""Janowski cube layer (janowski.py, janowski_agent.py).
 
 Numeric fixtures: Janowski (1993), its Senkiewicz-Ballard example and
 its Tables 1/2, plus hand-derived values and self-consistency checks at
-fixed x. The agent tests need the production checkpoints and the
-bearoff tables (bearoff.py).
+fixed x. The agent tests need the production checkpoints.
 """
 
 import os
@@ -193,7 +192,7 @@ def test_batch_and_per_row_x():
 def test_cash_point_and_fold():
     # W=L=1, x=2/3: CP=(1+.5+1/3)/(2+1/3)=.7857
     assert cash_point(1, 1, 2.0 / 3.0) == pytest.approx(11.0 / 14.0, abs=1e-4)
-    # GetECF3 fold: double only when both DT and DP beat ND
+    # Cube fold: double only when both DT and DP beat ND
     assert fold_cube_decision(nd=0.4, dt=0.7) == pytest.approx(0.7)   # take
     assert fold_cube_decision(nd=0.4, dt=1.5) == pytest.approx(1.0)   # pass
     assert fold_cube_decision(nd=0.8, dt=0.7) == pytest.approx(0.8)   # no double
@@ -301,7 +300,7 @@ def test_money_cube_action_is_tdagent_rule():
                     TDAgent._money_cube_decision(nd, dt, persp, jac), dt <= 1.0)
 
 
-# ── Agent-level tests (production checkpoints + bearoff tables) ──────
+# ── Agent-level tests (production checkpoints) ──────
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROB5 = os.path.join(_REPO, "best_models", "cubeless_prob5_512_512_256_256.pt")
@@ -312,12 +311,8 @@ FIXEDPOOL_CUBEFUL = os.path.join(_REPO, "experiments", "benchmarks",
 
 @pytest.fixture(scope="module")
 def agent0():
-    import bearoff
     if not os.path.exists(PROB5):
         pytest.skip("prob5 checkpoint not available")
-    if not (os.path.exists(bearoff.DEFAULT_TABLE)
-            and os.path.exists(bearoff.DEFAULT_TS_TABLE)):
-        pytest.skip("bearoff tables not built")
     from model import load_model
     from janowski_agent import JanowskiAgent
     return JanowskiAgent(load_model(PROB5))
@@ -348,10 +343,8 @@ def test_janowski_x_env_reaches_agent(agent0, monkeypatch):
 
 def test_0ply_decisions_on_pool(agent0):
     """0-ply smoke on committed-pool positions: legal moves, consistent
-    cube actions, values = the conversion at DEFAULT_X off the bearoff
-    class."""
+    cube actions, values = the conversion at DEFAULT_X."""
     import json
-    import bearoff
     from modes import MatchState, CubeOwner, cube_perspective
     pool = json.load(open(FIXEDPOOL_CUBEFUL))
     for r in pool["checker"][:20]:
@@ -376,13 +369,12 @@ def test_0ply_decisions_on_pool(agent0):
         nd, dt = o._cache["v_no_double_0ply"], o._cache["v_double_take_0ply"]
         assert (o.should_double, agent0.respond_to_double(s, ms)) == \
             money_cube_action(nd, dt, persp, ms.jacoby)
-        if not bearoff.is_bearoff_class(s):
-            probs = agent0._probs_state(s)
-            assert nd == pytest.approx(float(janowski_equity(
-                probs, persp, DEFAULT_X, ms.jacoby)), abs=1e-12)
-            assert dt == pytest.approx(2 * float(janowski_equity(
-                probs, CubePerspective.THEIRS, DEFAULT_X, ms.jacoby)), abs=1e-12)
-            n += 1
+        probs = agent0._probs_state(s)
+        assert nd == pytest.approx(float(janowski_equity(
+            probs, persp, DEFAULT_X, ms.jacoby)), abs=1e-12)
+        assert dt == pytest.approx(2 * float(janowski_equity(
+            probs, CubePerspective.THEIRS, DEFAULT_X, ms.jacoby)), abs=1e-12)
+        n += 1
     assert n >= 20
 
 
@@ -447,7 +439,7 @@ def test_oneply_value_and_fold_direction(agent1):
     v_nofold = agent1._value_oneply_cubeful(s, ms, fold=False)
     v_fold = agent1._value_oneply_cubeful(s, ms, fold=True)
     assert -3.0 <= v_nofold <= 3.0
-    # GetECF3 fold can only raise the roller's value (max(ND, ...)).
+    # The cube fold can only raise the roller's value (max(ND, ...)).
     assert v_fold >= v_nofold - 1e-12
 
 
@@ -477,8 +469,6 @@ def test_0ply_checker_folds_opponent_cube(agent0):
     pool = json.load(open(FIXEDPOOL_CUBEFUL))
     bound = 0
     for r in pool["checker"][:300]:
-        if r["off"] != [0, 0]:
-            continue                      # keep the bearoff routing out
         s = BoardState(points=r["points"], bar=r["bar"], off=r["off"], turn=r["turn"])
         dice = tuple(r["dice"])
         for owner in (CubeOwner.CENTERED, CubeOwner(2 - s.turn), CubeOwner(1 + s.turn)):
@@ -548,31 +538,7 @@ def test_cubeless_checker_ablation(agent0):
         JanowskiAgent(load_model(PROB5), cubeless_checker=True, oneply=True)
 
 
-def test_bearoff_routing(agent0):
-    """Bearoff-class cube decisions route to exact values, not net+x."""
-    import bearoff
-    from modes import MatchState
-    # gammon-free two-sided bearoff: 4 checkers each, several off
-    pts = [0] * 24
-    pts[0] = pts[1] = 2
-    pts[22] = pts[23] = -2
-    s = BoardState(points=pts, off=[11, 11], turn=WHITE)
-    assert bearoff.is_bearoff_class(s)
-    ms = MatchState()
-    nd_dt = bearoff.race_cube_values(s, CubePerspective.CENTERED)
-    assert nd_dt is not None
-    offer = agent0.offer_double(s, ms)
-    assert offer._cache["v_no_double_0ply"] == pytest.approx(nd_dt[0], abs=1e-9)
-    assert offer._cache["v_double_take_0ply"] == pytest.approx(nd_dt[1], abs=1e-9)
-    # ablation flag really disables the routing
-    from model import load_model
-    from janowski_agent import JanowskiAgent
-    off_agent = JanowskiAgent(load_model(PROB5), bearoff_exact=False)
-    offer2 = off_agent.offer_double(s, ms)
-    assert offer2._cache["v_no_double_0ply"] != pytest.approx(nd_dt[0], abs=1e-6)
-
-
-def test_bearoff_checker_routing_runs(agent0):
+def test_bearoff_position_checker_play_runs(agent0):
     from modes import MatchState
     pts = [0] * 24
     pts[0] = pts[2] = pts[4] = 2
@@ -583,80 +549,17 @@ def test_bearoff_checker_routing_runs(agent0):
     assert out[0].turn == BLACK
 
 
-def test_bearoff_td_agent(agent0):
-    """4L + bearoff routing: exact in class, stock TDAgent elsewhere."""
-    import bearoff
-    from encoding import CubePerspective as CP
-    from modes import MatchState
-    from model import load_model
-    from td_agent import TDAgent
-    from bearoff_td import BearoffTDAgent
-    if not os.path.exists(CUBEFUL):
-        pytest.skip("cubeful 4L unavailable")
-    bo = BearoffTDAgent(load_model(CUBEFUL))
-    plain = TDAgent(load_model(CUBEFUL))
-    ms = MatchState()
-    # bearoff-class: exact values in the cache
-    pts = [0] * 24
-    pts[0] = pts[1] = 2
-    pts[22] = pts[23] = -2
-    s = BoardState(points=pts, off=[11, 11], turn=WHITE)
-    nd_dt = bearoff.race_cube_values(s, CP.CENTERED)
-    offer = bo.offer_double(s, ms)
-    assert offer._cache["v_no_double_0ply"] == pytest.approx(nd_dt[0])
-    assert offer._cache["v_double_take_0ply"] == pytest.approx(nd_dt[1])
-    # contact: identical decision to the stock agent
-    s0 = BoardState.initial()
-    assert (bo.offer_double(s0, ms).should_double
-            == plain.offer_double(s0, ms).should_double)
-    out = bo.choose_checker_action_cubeful(s0, (3, 1), ms)
-    out_plain = plain.choose_checker_action_cubeful(s0, (3, 1), ms)
-    assert out[0] == out_plain[0]
-    # a full game JanowskiAgent vs BearoffTDAgent completes
-    import random
-    from play_models import play_game
-    random.seed(5)
-    winner, stake = play_game(agent0, bo, cubeful=True, jacoby=True)
-    assert winner in (WHITE, BLACK) and stake >= 1
-
-
-def test_bearoff_td_agent_oneply_race_root(agent0):
-    """1-ply BearoffTDAgent on a race root with exact and net candidates."""
-    from modes import MatchState
-    from model import load_model
-    from bearoff_td import BearoffTDAgent
-    if not os.path.exists(CUBEFUL):
-        pytest.skip("cubeful 4L unavailable")
-    bo1 = BearoffTDAgent(load_model(CUBEFUL), oneply=True)
-    pts = [0] * 24
-    pts[0] = pts[2] = pts[4] = pts[7] = 2
-    pts[19] = pts[21] = pts[23] = -2
-    s = BoardState(points=pts, off=[7, 9], turn=WHITE)
-    assert is_race(s)
-    out = bo1.choose_checker_action_cubeful(s, (5, 2), MatchState())
-    assert out is not None and out[0].turn == BLACK
-
-
-def test_side_specs_build_both_agents(agent0):
+def test_side_spec_builds_agent(agent0):
     from play_models import _build_side, _detect_side_type
     from janowski_agent import JanowskiAgent
-    from bearoff_td import BearoffTDAgent
-    if not os.path.exists(CUBEFUL):
-        pytest.skip("cubeful 4L unavailable")
     kw = dict(plies=0, sage_plies=1, cubeless_money=False, cubeful=True,
               oneply=False, twoply_k=0, bf16=False)
     j = "janowski:" + PROB5
-    b = "bo:" + CUBEFUL
     assert _detect_side_type(j) == "janowski"
-    assert _detect_side_type(b) == "bo"
     assert isinstance(_build_side(j, "janowski", **kw), JanowskiAgent)
-    assert isinstance(_build_side(b, "bo", **kw), BearoffTDAgent)
     with pytest.raises(ValueError):
         _build_side(j, "janowski", **{**kw, "cubeful": False,
                                       "cubeless_money": True})
-    with pytest.raises(ValueError):
-        _build_side(b, "bo", **{**kw, "cubeful": False,
-                                "cubeless_money": True})
 
 
 def test_full_game_vs_cubeful_4l(agent0):
@@ -671,40 +574,6 @@ def test_full_game_vs_cubeful_4l(agent0):
     for _ in range(3):
         winner, stake = play_game(agent0, opp, cubeful=True, jacoby=True)
         assert winner in (WHITE, BLACK) and stake >= 1
-
-
-def test_gammonish_bearoff_uses_exact_probs(agent0):
-    """Gammons possible in a bearoff-class position: exact probabilities
-    through the conversion at the agent's x, for the cube and for
-    checker-play successors."""
-    import bearoff
-    from modes import MatchState, CubeOwner, cube_perspective
-    pts = [0] * 24
-    pts[5] = 12                      # WHITE: 12 on its 6-point, 3 off
-    pts[23 - 5] = -15                # BLACK: 15 on its 6-point, none off
-    s = BoardState(points=pts, off=[3, 0], turn=WHITE)
-    assert bearoff.is_bearoff_class(s) and bearoff.race_cube_values(
-        s, CubePerspective.CENTERED) is None
-    probs = bearoff.exact_probs5(s)
-    for owner in (CubeOwner.CENTERED, CubeOwner(WHITE + 1)):
-        ms = MatchState(cube_owner=owner, cube_value=1 if owner == 0 else 2,
-                        jacoby=False)
-        p = cube_perspective(owner, WHITE)
-        nd, dt = agent0._static_nd_dt(s, ms)
-        assert nd == pytest.approx(float(janowski_equity(
-            probs, p, DEFAULT_X, False)), abs=1e-12)
-        assert dt == pytest.approx(2 * float(janowski_equity(
-            probs, CubePerspective.THEIRS, DEFAULT_X, False)), abs=1e-12)
-    # BLACK to move 2-1: every successor is gammonish bearoff class
-    t = BoardState(points=pts, off=[3, 0], turn=BLACK)
-    ms = MatchState(jacoby=False)
-    feats, nxt = agent0._get_legal_plays_encoded(t, (2, 1))
-    succ = [nxt[i] for i in range(len(nxt))]
-    eq, _ = agent0._screen_scores_0ply(feats, succ, CubePerspective.CENTERED, ms)
-    for e, ns in zip(eq, succ):
-        assert e == pytest.approx(float(janowski_equity_folded(
-            bearoff.exact_probs5(ns), CubePerspective.CENTERED,
-            DEFAULT_X, False)), abs=1e-12)
 
 
 def test_0ply_exact_tie_goes_to_better_cubeless(agent0):
@@ -789,7 +658,6 @@ def test_oneply_structure(agent1):
     (as TDAgent's cubeful 1-ply), the roller's decision folded on top.
     At least one position has branch replies that differ."""
     import json
-    import bearoff
     from modes import MatchState, CubeOwner
     pool = json.load(open(FIXEDPOOL_CUBEFUL))
     picked = {"contact": 0, "race": 0}
@@ -797,8 +665,7 @@ def test_oneply_structure(agent1):
     for r in pool["checker"]:
         s = BoardState(points=r["points"], bar=r["bar"], off=r["off"], turn=r["turn"])
         kind = "race" if is_race(s) else "contact"
-        if picked[kind] == 3 or bearoff.may_reach_bearoff(s, 1) \
-                or any(t.is_game_over() for d in DICE for _, t in get_legal_plays(s, d)):
+        if picked[kind] == 3 or any(t.is_game_over() for d in DICE for _, t in get_legal_plays(s, d)):
             continue
         # the leaf player (the roller's opponent) is near its doubling window
         nd, dt = agent1._static_nd_dt(switch_turn(s), MatchState())
@@ -824,7 +691,7 @@ def test_oneply_structure(agent1):
 
 
 def test_oneply_expands_every_candidate(agent1):
-    """1-ply checker play scores every non-exact candidate at 1-ply (no
+    """1-ply checker play scores every non-terminal candidate at 1-ply (no
     move filter)."""
     from modes import MatchState
     s = BoardState.initial()

@@ -16,14 +16,8 @@ library whose bgc_abi_version or struct sizes differ, naming the rebuild.
 given one.
 Prob5Jan (prob5 + Janowski money cube, janowski_agent.JanowskiAgent at
 its defaults): `Engine(prob5_model, janowski=True, x=None,
-board_sanity=True, bearoff=True)` / `CAgent(..., janowski=True)`; the
-bearoff tables come from `BearoffTable` (bearoff.c_table_path()'s flat
-file, one mmap per process and backend); `JanowskiC` mirrors janowski.py's
-conversion and bearoff.py's exact values for parity tests.
-Cubeful + bearoff tables (bearoff_td.BearoffTDAgent, side bo:):
-`Engine(cubeful_model, bearoff=True, bearoff_hazard=True)` /
-`CAgent(..., bearoff=True)`; bearoff_hazard=False routes the two-sided
-table only.
+board_sanity=True)` / `CAgent(..., janowski=True)`; `JanowskiC` mirrors
+janowski.py's conversion for parity tests.
 A .pt is exported to BGNN in a private 0700 temp dir (removed at exit);
 the export names the net's encoder (export_weights.py format 2) and
 bgc_open resolves it through the C API's encoder table (Engine.encoder;
@@ -55,7 +49,7 @@ BACKENDS = ("torch", "simd", "cblas", "ref")
 PLAY_BACKEND = "simd"       # fastest at play batch sizes
 
 # puretd.h BGC_ABI_VERSION; bump both on any public struct or signature change.
-ABI_VERSION = 4
+ABI_VERSION = 7
 _ABI_TAG = f"puretd-abi:{ABI_VERSION}\0".encode()
 
 KIND_PROB, KIND_EQUITY, KIND_CUBEFUL, KIND_PROB5 = 0, 1, 2, 3
@@ -310,23 +304,15 @@ def load_lib(backend):
         "bgc_bench_selfplay": ([E, P(CGameOpts), ctypes.c_ulonglong, I, I, I,
                                 P(D), P(I), P(ctypes.c_longlong)], I),
     }
-    D5, BO = P(D), ctypes.c_void_p
+    D5 = P(D)
     sig.update({
         "bgc_open_janowski": ([ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t], E),
         "bgc_set_jan": ([E, P(CJanOpts)], I),
-        "bgc_bearoff_open": ([ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t], BO),
-        "bgc_bearoff_close": ([BO], None),
-        "bgc_set_bearoff": ([E, BO], I),
-        "bgc_set_bearoff_hazard": ([E, I], I),
         "bgc_jan_equity": ([D5, I, D, I], D),
         "bgc_jan_equity_folded": ([D5, I, D, I], D),
         "bgc_jan_cubeless_equity": ([D5], D),
         "bgc_jan_fold": ([D, D], D),
         "bgc_jan_money_cube_action": ([D, D, I, I, P(I)], I),
-        "bgc_bo_exact_probs5": ([BO, BS, D5], I),
-        "bgc_bo_race_equity": ([BO, BS, I, I, P(D)], I),
-        "bgc_bo_race_cube_values": ([BO, BS, I, P(D), P(D)], I),
-        "bgc_bo_ts_win_prob": ([BO, BS, P(D)], I),
     })
     for name, (args, res) in sig.items():
         fn = getattr(L, name)
@@ -506,79 +492,18 @@ def _jan_lib(backend):
     return lib
 
 
-class BearoffTable:
-    """bgc_bearoff: bearoff.py's tables mmapped from the flat file
-    (path None: bearoff.c_table_path(), exported on demand). Read-only;
-    engines holding it keep a reference. `BearoffTable.default()` is one
-    shared instance per (backend, path)."""
-
-    _cache = {}
-
-    def __init__(self, path=None, backend=None):
-        import bearoff
-        self.backend = backend or default_backend()
-        self.lib = _jan_lib(self.backend)
-        self.path = path or bearoff.c_table_path()
-        err = ctypes.create_string_buffer(1024)
-        self.h = self.lib.bgc_bearoff_open(self.path.encode(), err, len(err))
-        if not self.h:
-            raise RuntimeError(err.value.decode(errors="replace"))
-
-    @classmethod
-    def default(cls, backend=None, path=None):
-        key = (backend or default_backend(), path)
-        if key not in cls._cache:
-            cls._cache[key] = cls(path, key[0])
-        return cls._cache[key]
-
-    def close(self):
-        if getattr(self, "h", None):
-            self.lib.bgc_bearoff_close(self.h)
-            self.h = None
-
-    def __del__(self):
-        try:
-            self.close()
-        except Exception:
-            pass
-
-
-def _bearoff_table(bearoff, backend):
-    """Engine's bearoff= argument -> a BearoffTable or None."""
-    if bearoff is True:
-        return BearoffTable.default(backend)
-    if bearoff is None or bearoff is False:
-        return None
-    if isinstance(bearoff, str):
-        return BearoffTable.default(backend, bearoff)
-    if isinstance(bearoff, BearoffTable):
-        if bearoff.lib is not load_lib(backend):
-            raise ValueError("BearoffTable opened on another backend library")
-        return bearoff
-    raise TypeError(f"bearoff must be True/False, a path or a BearoffTable "
-                    f"(got {type(bearoff).__name__})")
-
-
 def _probs5(p):
     a = np.ascontiguousarray(np.asarray(p, dtype=np.float64).reshape(5))
     return a, a.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
 
 
 class JanowskiC:
-    """janowski.py's conversion and bearoff.py's exact values through the
-    C API (scalar forms), for parity tests. `bearoff`: a BearoffTable, or
-    None for the default table (opened on first use)."""
+    """janowski.py's conversion through the C API (scalar forms), for
+    parity tests."""
 
-    def __init__(self, backend=None, bearoff=None):
+    def __init__(self, backend=None):
         self.backend = backend or default_backend()
         self.lib = _jan_lib(self.backend)
-        self._bo = bearoff
-
-    @property
-    def table(self):
-        if self._bo is None:
-            self._bo = BearoffTable.default(self.backend)
-        return self._bo
 
     def janowski_equity(self, probs, persp, x, jacoby):
         a, ptr = _probs5(probs)
@@ -602,60 +527,16 @@ class JanowskiC:
                                                int(bool(jacoby)), ctypes.byref(take))
         return bool(d), bool(take.value)
 
-    def _check(self, r, what):
-        if r < 0:
-            raise RuntimeError(f"{what} failed")
-        return r == 1
-
-    def exact_probs5(self, state):
-        """bearoff.exact_probs5; None when not bearoff class."""
-        p = np.zeros(5)
-        ok = self._check(self.lib.bgc_bo_exact_probs5(
-            self.table.h, ctypes.byref(_python_to_c(state)),
-            p.ctypes.data_as(ctypes.POINTER(ctypes.c_double))), "bgc_bo_exact_probs5")
-        return p if ok else None
-
-    def race_equity(self, state, persp, with_own_fold=False):
-        v = ctypes.c_double()
-        ok = self._check(self.lib.bgc_bo_race_equity(
-            self.table.h, ctypes.byref(_python_to_c(state)), int(persp),
-            int(bool(with_own_fold)), ctypes.byref(v)), "bgc_bo_race_equity")
-        return v.value if ok else None
-
-    def race_cube_values(self, state, persp):
-        nd, dt = ctypes.c_double(), ctypes.c_double()
-        ok = self._check(self.lib.bgc_bo_race_cube_values(
-            self.table.h, ctypes.byref(_python_to_c(state)), int(persp),
-            ctypes.byref(nd), ctypes.byref(dt)), "bgc_bo_race_cube_values")
-        return (nd.value, dt.value) if ok else None
-
-    def ts_win_prob(self, state):
-        p = ctypes.c_double()
-        ok = self._check(self.lib.bgc_bo_ts_win_prob(
-            self.table.h, ctypes.byref(_python_to_c(state)), ctypes.byref(p)),
-            "bgc_bo_ts_win_prob")
-        return p.value if ok else None
-
-
 # ── Engine ─────────────────────────────────────────────────────────
 
 class Engine:
     """One bgc_engine: a model on one backend. Thread-confined.
-    janowski=True: a prob5 model as Prob5Jan (x None = janowski.DEFAULT_X;
-    bearoff: None/True = the default BearoffTable, a path, a BearoffTable,
-    or False = no exact bearoff). A cubeful model with bearoff (True, a
-    path or a BearoffTable; default None = none) plays as
-    bearoff_td.BearoffTDAgent; bearoff_hazard=False routes the two-sided
-    table only."""
+    janowski=True: a prob5 model as Prob5Jan (x None = janowski.DEFAULT_X)."""
 
     def __init__(self, model, backend=None, root_filter=0.0, janowski=False, x=None,
-                 board_sanity=True, bearoff=None, bearoff_hazard=True):
-        if janowski and not bearoff_hazard:
-            raise ValueError("the C Prob5Jan routes both bearoff tiers "
-                             "(bearoff_hazard=False is cubeful-only)")
+                 board_sanity=True):
         self.backend = backend or default_backend()
         self.lib = _jan_lib(self.backend) if janowski else load_lib(self.backend)
-        self._bearoff = None
         if isinstance(model, str) and model.endswith(".bin"):
             path, tmp = model, False
         else:
@@ -682,12 +563,8 @@ class Engine:
         self._states = (_CBoardState * MAX_PLAYS)()
         self.root_filter = 0.0
         self.set_root_filter(root_filter)
-        self.bearoff_hazard = True
         if janowski:
             self.set_jan(x, board_sanity)
-            self.set_bearoff(True if bearoff is None else bearoff)
-        elif bearoff:
-            self.set_bearoff(bearoff, hazard=bearoff_hazard)
 
     def set_jan(self, x=None, board_sanity=True):
         """Prob5Jan's x (None: janowski.DEFAULT_X) and board_sanity."""
@@ -696,25 +573,6 @@ class Engine:
         if self.lib.bgc_set_jan(self.h, ctypes.byref(o)) != 0:
             raise ValueError(f"bgc_set_jan failed (kind {self.kind}, x {x!r})")
         self.x, self.board_sanity = o.x, bool(board_sanity)
-
-    def set_bearoff(self, table=True, hazard=None):
-        """Exact bearoff tables: True (default table), a path, a
-        BearoffTable, or None/False (off). Prob5Jan: bearoff_exact.
-        Cubeful: BearoffTDAgent's routing; `hazard` False = the two-sided
-        table only, True = also the hazard DP (the default at open), None
-        = unchanged."""
-        if hazard is not None:
-            if self.lib.bgc_set_bearoff_hazard(self.h, int(bool(hazard))) != 0:
-                raise ValueError(f"bgc_set_bearoff_hazard: cubeful engines only "
-                                 f"(kind {self.kind})")
-            self.bearoff_hazard = bool(hazard)
-        t = _bearoff_table(table, self.backend)
-        if self.lib.bgc_set_bearoff(self.h, t.h if t is not None else None) != 0:
-            self._bearoff = None
-            raise ValueError(f"bgc_set_bearoff failed (kind {self.kind}, encoder "
-                             f"{self.encoder}): Prob5Jan, or a cubeful net on "
-                             f"perspective196")
-        self._bearoff = t                         # keeps the mmap alive
 
     def set_root_filter(self, thresh):
         """1-ply root move filter threshold (bgc_set_search); 0 = full width."""
@@ -848,9 +706,6 @@ class Engine:
         (-2), the seed is replayed into the call's own buffers from twice
         that capacity, and the result does not share memory with `out`
         (compare `enc.ctypes.data`)."""
-        if self.kind == KIND_CUBEFUL and self._bearoff is not None:
-            raise ValueError("bgc_collect: a cubeful engine with bearoff tables "
-                             "attached does not collect (set_bearoff(False) first)")
         if isinstance(opts, CCollectOpts):
             o = CCollectOpts(opts.oneply, opts.jacoby, opts.max_plies)
             for k, v in kwargs.items():
@@ -957,9 +812,14 @@ def play_game(white, black, opts, rng, record=False, *, reference=None, vr_every
     if reference is not None:
         if reference.lib is not white.lib:
             raise ValueError("reference must use the same backend library")
-        kinds = (KIND_CUBEFUL,) if opts.cubeful else (KIND_EQUITY, KIND_PROB5)
-        if any(e.kind not in kinds for e in (white, black, reference)):
-            raise ValueError("luck correction requires matching cubeful or cubeless money models")
+        if opts.cubeful:
+            ok = (reference.kind == KIND_CUBEFUL
+                  and all(e.kind in (KIND_CUBEFUL, KIND_PROB5JAN) for e in (white, black)))
+        else:
+            ok = all(e.kind in (KIND_EQUITY, KIND_PROB5) for e in (white, black, reference))
+        if not ok:
+            raise ValueError("luck correction requires matching cubeful or cubeless money "
+                             "models (cubeful: Prob5Jan players allowed, reference cubeful)")
         if not isinstance(vr_every, int) or not 1 <= vr_every <= 2**31 - 1:
             raise ValueError("vr_every must be a positive C int")
     if not isinstance(rng, Rng):
@@ -1005,9 +865,7 @@ class CAgent(Agent):
                  janowski=False, **engine_kw):
         """root_filter: 1-ply root filter threshold (None: PURETD_ROOT_FILTER,
         ignored for janowski; a nonzero explicit one raises for janowski).
-        janowski: Prob5Jan (engine_kw: Engine's x, board_sanity, bearoff).
-        A cubeful model with bearoff=True (engine_kw; bearoff_hazard) is
-        bearoff_td.BearoffTDAgent."""
+        janowski: Prob5Jan (engine_kw: Engine's x, board_sanity)."""
         if plies not in (0, 1):
             raise ValueError(f"CAgent supports plies 0 or 1 (got {plies})")
         self.engine = engine if engine is not None else Engine(

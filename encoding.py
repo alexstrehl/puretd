@@ -10,6 +10,8 @@ Layout (196 features), per block (98):
     24 points x 4-unit thermometer   = 96
     bar / 2.0                        =  1
     off / 15.0                       =  1
+The per-point thermometer, bar and off features follow Tesauro's
+TD-Gammon input encoding.
 
 Network output is also from the on-roll player's view (win
 probability, equity, or prob5; see model.py).

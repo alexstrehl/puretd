@@ -1,8 +1,16 @@
 This patch modifies GNU Backgammon 1.08.003 (gnubgmodule.c), adding a per-item
-timing loop used only for benchmarking.
-Copyright (C) 2026 Alex Strehl
-License: GPL-3.0-or-later (https://www.gnu.org/licenses/gpl-3.0.html), as GNU
-Backgammon. The rest of this repository is MIT (see LICENSE).
+timing loop used only for benchmarking. Modified 2026-11.
+
+Copyright (C) 2026 Alex Strehl. Contains code from gnubgmodule.c, Copyright (C)
+2003-2004 Joern Thyssen and (C) 2003-2022 the GNU Backgammon authors.
+
+This patch is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. It is distributed WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+General Public License in COPYING in this directory. The rest of this
+repository is MIT (see LICENSE).
 
 --- a/gnubgmodule.c
 +++ b/gnubgmodule.c

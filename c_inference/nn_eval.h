@@ -46,8 +46,9 @@ typedef struct {
     int input_size;
     int activation;
     int output_mode;                    /* 0=probability, 1=equity, 2=prob5 */
-    int prob5_board_sanity;             /* prob5: 1 = gnubg SanityCheck zeroing
-                                           (Prob5Jan); nn_load sets 0 (plain prob5) */
+    int prob5_board_sanity;             /* prob5: 1 = board-sanity zeroing,
+                                           prob5_sanity.h (Prob5Jan); nn_load
+                                           sets 0 (plain prob5) */
     int hidden_sizes[NN_MAX_LAYERS];
 
     /* Per-layer weights and biases (num_hidden + 1 for output layer) */
@@ -75,8 +76,8 @@ void nn_free(NNModel *model);
  * equity mode: expected equity, linear.
  * prob5 mode: money equity from the 5 sigmoid outputs after the nesting
  * clamps (2*Pw + Pwg + Pwbg - Plg - Plbg - 1); with prob5_board_sanity
- * (input must be perspective196), gnubg's SanityCheck "impossible"
- * zeroing first.
+ * (input must be perspective196), the board-sanity zeroing of
+ * prob5_sanity.h first.
  */
 float nn_forward(const NNModel *model, const float *input);
 

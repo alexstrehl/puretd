@@ -23,10 +23,54 @@ DEFAULT_LIB = os.path.join(_HERE, "opensage_mobile_build", "libbgsage_mobile.so"
 BUDGET_MS = 1000  # the API maximum; checked between candidates
 
 
-class Request(C.Structure):
-    _fields_ = [("board", C.c_int * 26)] + [(n, C.c_int) for n in (
-        "die1", "die2", "ply", "cube_value", "cube_owner", "away1", "away2",
-        "is_crawford", "jacoby", "beaver", "budget_ms")]
+# ctypes binding of cpp/include/bgbot/mobile.h (bgsage v2.0.20260907).
+class BgsageMobileRequest(C.Structure):
+    _fields_ = [
+        ("board", C.c_int * 26),
+        ("die1", C.c_int), ("die2", C.c_int), ("ply", C.c_int),
+        ("cube_value", C.c_int), ("cube_owner", C.c_int),
+        ("away1", C.c_int), ("away2", C.c_int), ("is_crawford", C.c_int),
+        ("jacoby", C.c_int), ("beaver", C.c_int),
+        ("budget_ms", C.c_int),
+    ]
+
+
+_ENGINE = C.c_void_p  # BgsageMobileEngine*
+_TEXT = C.c_void_p    # caller-owned JSON; kept as an address for bgsage_mobile_free
+_PROTOTYPES = {
+    "bgsage_mobile_create": (
+        [C.c_char_p, C.POINTER(C.c_char_p), C.POINTER(C.c_int), C.c_int, C.c_char_p],
+        _ENGINE),
+    "bgsage_mobile_destroy": ([_ENGINE], None),
+    "bgsage_mobile_analyze": ([_ENGINE, C.c_int, C.POINTER(BgsageMobileRequest)], _TEXT),
+    "bgsage_mobile_free": ([_TEXT], None),
+    "bgsage_mobile_last_error": ([], C.c_char_p),
+}
+
+
+def _load(path):
+    lib = C.CDLL(path)
+    for name, (argtypes, restype) in _PROTOTYPES.items():
+        fn = getattr(lib, name)
+        fn.argtypes, fn.restype = argtypes, restype
+    return lib
+
+
+def _c_array(ctype, items):
+    items = list(items)
+    return (ctype * len(items))(*items)
+
+
+def production_weights_args():
+    """Open Sage's production nets and bearoff database as the arguments of
+    ``bgsage_mobile_create`` (and of libsage_bench's ``sb_create``):
+    (strategy type, weight paths, hidden sizes, count, bearoff path)."""
+    from bgsage.weights import default_weights, bearoff_db_path
+    w = default_weights()
+    paths = _c_array(C.c_char_p, (str(p).encode() for p in w.weight_paths_list))
+    hidden = _c_array(C.c_int, w.hidden_sizes_list)
+    return (w.strategy_type.encode(), paths, hidden, len(paths),
+            str(bearoff_db_path()).encode())
 
 
 _OWNER = {"centered": 0, "player": 1, "opponent": 2}
@@ -38,34 +82,18 @@ class SageMobile:
     def __init__(self, lib_path=None):
         from third_party_opponents.opensage.opensage_agents import assert_sage_version
         assert_sage_version()
-        from bgsage.weights import default_weights, bearoff_db_path
         path = lib_path or os.environ.get("BGSAGE_MOBILE_LIB", DEFAULT_LIB)
         if not os.path.exists(path):
             raise FileNotFoundError(
                 f"libbgsage_mobile.so not found at {path}: build it with "
                 "bash third_party_opponents/opensage/opensage_mobile_build.sh "
                 "or set BGSAGE_MOBILE_LIB")
-        lib = C.CDLL(path)
-        lib.bgsage_mobile_create.argtypes = [
-            C.c_char_p, C.POINTER(C.c_char_p), C.POINTER(C.c_int), C.c_int,
-            C.c_char_p]
-        lib.bgsage_mobile_create.restype = C.c_void_p
-        lib.bgsage_mobile_analyze.argtypes = [C.c_void_p, C.c_int,
-                                              C.POINTER(Request)]
-        lib.bgsage_mobile_analyze.restype = C.c_void_p
-        lib.bgsage_mobile_free.argtypes = [C.c_void_p]
-        lib.bgsage_mobile_destroy.argtypes = [C.c_void_p]
-        lib.bgsage_mobile_last_error.restype = C.c_char_p
-        w = default_weights()
-        paths = (C.c_char_p * len(w.weight_paths_list))(
-            *[str(p).encode() for p in w.weight_paths_list])
-        hidden = (C.c_int * len(w.hidden_sizes_list))(*w.hidden_sizes_list)
-        h = lib.bgsage_mobile_create(w.strategy_type.encode(), paths, hidden,
-                                     len(paths), str(bearoff_db_path()).encode())
+        lib = _load(path)
+        h = lib.bgsage_mobile_create(*production_weights_args())
         if not h:
             raise RuntimeError(f"bgsage_mobile_create: {lib.bgsage_mobile_last_error()}")
         self._lib, self._h = lib, h
-        self._req = Request()
+        self._req = BgsageMobileRequest()
 
     def close(self):
         if self._h:

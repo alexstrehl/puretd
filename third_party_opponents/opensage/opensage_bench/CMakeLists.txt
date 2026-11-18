@@ -10,3 +10,7 @@ include(${BGSAGE_SRC}/cpp/CMakeLists_cpu.txt)
 add_library(sage_bench SHARED ${CMAKE_CURRENT_LIST_DIR}/sage_bench.cpp)
 target_link_libraries(sage_bench PRIVATE bgbot_lib)
 target_compile_definitions(sage_bench PRIVATE NOMINMAX)
+
+# Full-width vs pruned 1-ply agreement (sage_filt_check.cpp); not built by build.sh.
+add_executable(sage_filt_check EXCLUDE_FROM_ALL ${CMAKE_CURRENT_LIST_DIR}/sage_filt_check.cpp)
+target_link_libraries(sage_filt_check PRIVATE bgbot_lib)

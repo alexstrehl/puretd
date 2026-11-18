@@ -339,27 +339,23 @@ SAGE_BENCH_LIB = os.environ.get("SAGE_BENCH_LIB", os.path.join(
 class SageBench:
     """libsage_bench.so (third_party_opponents/opensage/opensage_bench/
     sage_bench.cpp, built by its build.sh): Open Sage's decision functions,
-    one item timed per call in C++. bench(kind, items, plies): kind 0 cubeful checker, 1 cube, 2
-    cubeless checker; items from sage_items(); returns (per-item seconds,
+    one item timed per call in C++. bench(kind, items, plies): kind 0 cubeful
+    checker, 1 cube, 2 cubeless checker, 3 cubeful checker pruned (1-ply, its
+    move-filter chooser); items from sage_items(); returns (per-item seconds,
     chosen boards or (double, take) pairs)."""
 
     def __init__(self):
         import ctypes as C
         from third_party_opponents.opensage.opensage_agents import assert_sage_version
         assert_sage_version()
-        from bgsage.weights import default_weights, bearoff_db_path
+        from third_party_opponents.opensage.opensage_mobile import production_weights_args
         lib = C.CDLL(SAGE_BENCH_LIB)
         ip, dp = C.POINTER(C.c_int), C.POINTER(C.c_double)
         lib.sb_create.argtypes = [C.c_char_p, C.POINTER(C.c_char_p), ip, C.c_int, C.c_char_p]
         lib.sb_create.restype = C.c_void_p
         lib.sb_bench.argtypes = [C.c_void_p, C.c_int, C.c_int, ip, ip, ip, ip, C.c_int, dp, ip]
         lib.sb_last_error.restype = C.c_char_p
-        w = default_weights()
-        paths = (C.c_char_p * len(w.weight_paths_list))(
-            *[str(p).encode() for p in w.weight_paths_list])
-        hidden = (C.c_int * len(w.hidden_sizes_list))(*w.hidden_sizes_list)
-        self._h = lib.sb_create(w.strategy_type.encode(), paths, hidden, len(paths),
-                                str(bearoff_db_path()).encode())
+        self._h = lib.sb_create(*production_weights_args())
         if not self._h:
             raise RuntimeError(f"sb_create: {lib.sb_last_error().decode()}")
         self._lib, self._C = lib, C
@@ -408,6 +404,18 @@ def _time_cubeful_sage(plies, checker_pts, cube_pts, cap, cube_cap):
           f"  |  cube {rcu:9.1f} dec/s 95%CI [{lcu:.1f},{hcu:.1f}] ({1000/rcu:.3f} ms)", flush=True)
 
 
+def _time_cubeful_sage_filtered(checker_pts, cap):
+    """Open Sage 1-ply cubeful checker, pruned: its move-filter chooser
+    (SageBench kind 3: caches cleared once per call, then kept across
+    items); its cube decision is the Open Sage 1-ply row's."""
+    sb = SageBench()
+    ck = sage_items(checker_pts[:cap])
+    r, lo, hi = _c_rate(lambda its: sb.bench(3, its, 1)[0], ck[:20], ck)
+    name = "Open Sage 1-ply filtered"
+    print(f"{name:<26} checker {r:9.1f} dec/s 95%CI [{lo:.1f},{hi:.1f}] ({1000/r:.3f} ms)",
+          flush=True)
+
+
 def run_cubeful(cap, engines, backends="torch,simd", plies=0, cube_cap=0,
                 root_filter=0.0):
     """cap / cube_cap: checker and cube items timed per engine, a uniform
@@ -435,6 +443,8 @@ def run_cubeful(cap, engines, backends="torch,simd", plies=0, cube_cap=0,
     for key, plies in (("sage0", 0), ("sage", 1)):
         if key in want:
             _time_cubeful_sage(plies, checker_pts, cube_pts, cap, cube_cap)
+    if "sage-filt" in want:
+        _time_cubeful_sage_filtered(checker_pts, cap)
     for key, sp in (("sage0-an", 1), ("sage-an", 2)):
         if key in want:
             # Sage's Python BgBotAnalyzer (reloads its nets per cube call).
@@ -493,7 +503,8 @@ def main():
                          "--cap (default --cap)")
     ap.add_argument("--engines", default="puretdc,sage0,sage",
                     help="cubeful: any of puretdc (C API), puretd (Python), "
-                         "sage0, sage (Open Sage), sage0-an, "
+                         "sage0, sage (Open Sage), sage-filt (Open Sage 1-ply pruned, "
+                         "checker only), sage0-an, "
                          "sage-an (its Python analyzer), hh-fox0, hh-fox1, hh-aureus0, "
                          "hh-aureus1")
     ap.add_argument("--root-filter", type=float, default=0.0, metavar="T",

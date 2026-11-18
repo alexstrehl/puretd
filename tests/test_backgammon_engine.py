@@ -216,7 +216,7 @@ def _bearoff_position_2():
 
 
 def test_bearoff_52_python():
-    """Bear-off with 5-2: 3 legal moves (verified vs gnubg)."""
+    """Bear-off with 5-2: 3 legal moves."""
     state = _bearoff_position_2()
     plays = get_legal_plays(state, (5, 2))
     assert len(plays) == 3, f"Expected 3, got {len(plays)}"

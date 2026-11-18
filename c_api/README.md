@@ -69,8 +69,8 @@ generation, selection, cube logic and the game loop are shared (`puretd.c`).
 | `bgc_value_1ply_play(e, s, d1, d2, cube, &v1, ...)` | `bgc_value_1ply` + `bgc_best_move` at 0-ply from one expansion (the roll's candidates are expansion replies; bitwise the two calls' results on `ref`/`simd`, the two calls on the others) |
 | `bgc_set_search(e, opts)` | 1-ply root move filter: expand only candidates within `root_thresh` of the best 0-ply score (game-ending kept; others score NAN); cube decisions stay full 1-ply; NULL or 0 = full width (default) |
 | `bgc_offer_double` / `bgc_respond_to_double` | money cube at 0/1-ply (cubeful nets, Prob5Jan); `bgc_cube_eval.take` = the responder's decision |
-| `bgc_open_janowski`, `bgc_set_jan`, `bgc_bearoff_open` / `_close`, `bgc_set_bearoff` | Prob5Jan (below) |
-| `bgc_jan_*`, `bgc_bo_*` | the Janowski conversion and the bearoff tables alone (parity tests) |
+| `bgc_open_janowski`, `bgc_set_jan` | Prob5Jan (below) |
+| `bgc_jan_*` | the Janowski conversion alone (parity tests) |
 | `bgc_rng_*` | `random.Random(seed)`-compatible MT19937 |
 | `bgc_play_game(white, black, opts, rng, res, rec, ctx)` | one cubeful or cubeless game, optional per-decision callback |
 | `bgc_play_game_vr(...)` | money game plus a centered dice-luck sum in actual points, with unchanged play and RNG |
@@ -96,8 +96,9 @@ is. Both terms use the reference's own best 0-ply move for each roll,
 passes and terminal moves included, so no player decision enters the
 correction, and play and the dice stream are those of the ordinary game.
 The two players and the reference share one backend and the game mode's
-kind (EQUITY or PROB5 cubeless, CUBEFUL cubeful); PROB5JAN and DMP
-references are not supported.
+kind (EQUITY or PROB5 cubeless, CUBEFUL cubeful); in cubeful games a
+player may also be Prob5Jan (PROB5JAN). PROB5JAN and DMP references are
+not supported.
 `Engine.dice_values(state, ms=None)` returns the same 21 values in
 `(1,1), (1,2), ..., (6,6)` order, per unit of the cube in cubeful games
 (ownership and Jacoby applied). The cubeful loop corrects after the cube
@@ -110,14 +111,11 @@ pairs by
 ## Prob5Jan (money Janowski)
 
 `janowski_agent.JanowskiAgent` at its defaults (x 0.76, every cube fold
-on, `board_sanity` on, exact bearoff when a table is attached) in C,
-`c_api/puretd_janowski.c`: the prob5 net's probabilities (gnubg's
-impossible-gammon zeroing, the clamps) through `janowski.py`'s money
-conversion, with `bearoff.py`'s exact tiers in bearoff-class positions.
+on, `board_sanity` on) in C, `c_api/puretd_janowski.c`: the prob5 net's
+probabilities (board-sanity zeroing, `c_inference/prob5_sanity.h`, then
+the clamps) through `janowski.py`'s money conversion.
 
     bgc_engine *e = bgc_open_janowski("prob5.bin", err, sizeof err);   /* BGC_KIND_PROB5JAN */
-    bgc_bearoff *t = bgc_bearoff_open(path, err, sizeof err);         /* one per process */
-    bgc_set_bearoff(e, t);                  /* NULL: no exact bearoff */
     bgc_jan_opts o = {0.76, 1};             /* x, board_sanity */
     bgc_set_jan(e, &o);
 
@@ -126,30 +124,22 @@ Then the money entry points (`bgc_best_move`, `bgc_score_moves`,
 `bgc_play_game` with cubeful opts, the bench calls); a cube is required.
 No root filter (`bgc_set_search` accepts 0 only), no collector.
 
-The bearoff file is `bearoff.export_c_tables()`'s flat copy of the two
-npz tables (~155 MB, mmapped read-only, shareable by engines and
-threads): `bearoff.c_table_path()` returns it, exporting it when it is
-missing or older than either npz (`BG_BEAROFF_C_TABLE`, default
-`~/.cache/bg_bearoff_c.bin`).
-
-Python: `Engine(prob5_pt, janowski=True, x=None, board_sanity=True,
-bearoff=True)`, `CAgent(prob5_pt, plies, janowski=True)`; `JanowskiC`
-mirrors `janowski.py` and `bearoff.py`. `play_models.py`: the side
-`janowski-c:<prob5.pt>`, or `janowski:<prob5.pt>` unless `--python-api`
-(`JANOWSKI_X`, `JANOWSKI_BOARD_SANITY`, `JANOWSKI_NO_BEAROFF` honoured;
-the `JANOWSKI_NO_FOLD*` / `JANOWSKI_CUBELESS_CHECKER` ablations and
-`--bf16` play `janowski:` on the Python path).
+Python: `Engine(prob5_pt, janowski=True, x=None, board_sanity=True)`,
+`CAgent(prob5_pt, plies, janowski=True)`; `JanowskiC` mirrors
+`janowski.py`. `play_models.py`: the side `janowski-c:<prob5.pt>`, or
+`janowski:<prob5.pt>` unless `--python-api` (`JANOWSKI_X` and
+`JANOWSKI_BOARD_SANITY` honoured; the `JANOWSKI_NO_FOLD*` /
+`JANOWSKI_CUBELESS_CHECKER` ablations and `--bf16` play `janowski:` on
+the Python path).
 
 Parity with `JanowskiAgent` (`tests/test_janowski_c.py`; full numbers in
-`experiments/c_collect/SPEC_p5jan_money_c.md`):
+`experiments/c_collect/SPEC_p5jan_money_c.md`; measured 2026-10 with the bearoff tables attached):
 
 | check | result |
 |---|---|
 | conversion (`bgc_jan_*`), random and edge vectors x persp x jacoby x folded | bitwise |
-| bearoff tables (`bgc_bo_*`): race equity, cube values, two-sided P | bitwise |
-| `exact_probs5` (Python's `np.dot` is BLAS order) | <= 2.2e-16 |
 | decisions (checker, offer, take, respond) on the cubeful pool and bearoff positions: 0-ply 12k + 8k, 1-ply 1.4k + 1.4k, torch and simd | 100% equal, no near-ties |
-| values and scores (fp32 forward differences amplified by the live-cube slope) | max 4.2e-6 (0-ply), 1.5e-6 (1-ply); bearoff-table values exact |
+| values and scores (fp32 forward differences amplified by the live-cube slope) | max 4.2e-6 (0-ply), 1.5e-6 (1-ply) |
 | paired-dice H-H vs the Python agent: 20k games 0-ply, 2k games 1-ply | every pair mirrored (0.0 mEq) |
 
 Per decision on one Zen 3 core (simd): 0-ply checker 0.12 ms (Python
@@ -214,7 +204,7 @@ both committed pools it picks the full-width move on 100% of prob5 and
 - Counting: `bgc_game_result.n_checker` includes forced passes in a
   cubeful game, not in a cubeless one; `n_dance` counts them in both. The
   `bgc_bench_selfplay` decision counts exclude forced passes in both modes
-  (gnubg's count).
+  (forced passes are not decisions).
 - Errors: `bgc_best_move` -2, cube functions -1, game/bench functions -1.
 
 ## Thread model

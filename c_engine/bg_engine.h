@@ -112,8 +112,8 @@ int get_legal_plays_encoded_21(const BoardState *next_state,
                                int max_replies);
 
 /*
- * gnubg 1.08 SanityCheck "impossible" rules on n perspective196 rows
- * (mirrors prob_agent.prob5_impossible): mask[4*r + j] = 1 zeroes
+ * prob5 board-sanity rules (c_inference/prob5_sanity.h) on n
+ * perspective196 rows (prob_agent.prob5_impossible): mask[4*r + j] = 1 zeroes
  * P(wg), P(wbg), P(lg), P(lbg) of row r. Returns the rows with any 1.
  */
 int prob5_impossible_mask(const float *x, int n, unsigned char *mask);

@@ -10,7 +10,7 @@ cost: [experiments/benchmarks/README.md](../../experiments/benchmarks/README.md)
 
 ```bash
 python experiments/head_to_head/run.py \
-    --side1 best_models/cubeless_prob5_512_512_256_256.pt \
+    --side1 best_models/history/cubeless_prob5_512_512_256_256_ac95a983.pt \
     --side2 hedgehog:third_party_opponents/hedgehog/fox_v0.34_2026-09-26.ogxf --c-api --c-api-backend simd \
     --game-mode cubeless-money --games 100000 --workers 32 --save <dir>
 ```
@@ -44,6 +44,10 @@ by `$HH_FOX` / `$HH_AUREUS` (benchmarks) and `$HH_MODEL` (tests):
 | aureus v0.12 | `aureus_v0.12_2026-09-26.ogxf` | `379f8f20dd2b0ce05f9e24f05098fb87` |
 | default-small v1.0 | `default-small_v1.0_2026-05-13.ogxf` | tests only |
 
+The models are for non-commercial use
+([hedgehog-bg.com/community](https://hedgehog-bg.com/community)) and are not
+covered by this repository's MIT licence.
+
 ## Engine configuration
 
 - Cube: Janowski formulas, x = 0.68, Jacoby-aware; the agent sets the shim's
@@ -62,6 +66,6 @@ by `$HH_FOX` / `$HH_AUREUS` (benchmarks) and `$HH_MODEL` (tests):
 - `HH_LIB=<shim.so> python third_party_opponents/hedgehog/validate_costpath.py`:
   the benchmark's native C path (0-ply successors evaluated in one batch,
   `eval_ensemble_successors`) picks the agent's move (each candidate
-  evaluated alone) on every item of both committed pools, Fox and Aureus:
-  0/8000 cubeless and 0/8994 cubeful mismatches each
+  evaluated alone) on every pool item with a legal move, fox and aureus:
+  0 of 8,000 cubeless and 0 of 8,994 cubeful items differ
   ([experiments/hedgehog/results/validate_costpath_e8847f4_20261010.txt](../../experiments/hedgehog/results/validate_costpath_e8847f4_20261010.txt)).

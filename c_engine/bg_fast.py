@@ -38,7 +38,8 @@ def _find_or_build_library() -> str:
     source = os.path.join(here, "bg_engine.c")
     # Staleness must include the header: a .so built against an old
     # bg_engine.h (e.g. MAX_PLAYS) is silently wrong, not a build error.
-    deps = [source, os.path.join(here, "bg_engine.h")]
+    deps = [source, os.path.join(here, "bg_engine.h"),
+            os.path.join(here, "..", "c_inference", "prob5_sanity.h")]
 
     if (
         os.path.isfile(lib_path)

@@ -10,11 +10,11 @@ engine agents (gnubg_external.GnubgExternalAgent, OpenSageAgent).
 
 Each side (--side1 / --side2) is a checkpoint path OR an engine keyword:
   gnubg-ext | gnubg-ext-full | opensage | opensage-native | opensage-analyzer | random |
-  hedgehog:<model.ogxf> | janowski:<prob5.pt> | bo:<cubeful.pt>
+  hedgehog:<model.ogxf> | janowski:<prob5.pt>
 --plies sets gnubg's search depth; --sage-plies sets Open Sage's ply
 (1 = 0-ply, 2 = 1-ply); --oneply1/2 puts a hedgehog side at
-depth 1 (HEDGEHOG.md). janowski: and bo: are the two sides of the
-cube-layer comparison, cubeful money only (experiments/janowski/README.md).
+depth 1 (HEDGEHOG.md). janowski: is Prob5Jan, cubeful money only
+(experiments/janowski/README.md).
 
 Examples (cubeless money, 1M games each):
   # PureTD 0-ply vs Open Sage 0-ply
@@ -56,9 +56,9 @@ def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--side1",
-                    help="model path | gnubg-ext | gnubg-ext-full | opensage | opensage-native | opensage-analyzer | random | hedgehog:<model.ogxf> | janowski:<prob5.pt> | bo:<cubeful.pt>")
+                    help="model path | gnubg-ext | gnubg-ext-full | opensage | opensage-native | opensage-analyzer | random | hedgehog:<model.ogxf> | janowski:<prob5.pt>")
     ap.add_argument("--side2",
-                    help="model path | gnubg-ext | gnubg-ext-full | opensage | opensage-native | opensage-analyzer | random | hedgehog:<model.ogxf> | janowski:<prob5.pt> | bo:<cubeful.pt>")
+                    help="model path | gnubg-ext | gnubg-ext-full | opensage | opensage-native | opensage-analyzer | random | hedgehog:<model.ogxf> | janowski:<prob5.pt>")
     ap.add_argument("--combine", default=None,
                     help="Directory of saved runs (--save dir): pool all games "
                          "and report the combined result; no new games are played.")
@@ -131,8 +131,8 @@ def main():
     if not (a.side1 and a.side2):
         ap.error("--side1 and --side2 are required (unless --combine is given)")
 
-    # Before any game: bearoff tables (janowski:/bo:), supported depths,
-    # the pinned gnubg (gnubg-ext*) and bgsage (opensage*).
+    # Before any game: supported depths, the pinned gnubg (gnubg-ext*)
+    # and bgsage (opensage*).
     from play_models import _detect_side_type, preflight_side
     try:
         for side in (a.side1, a.side2):

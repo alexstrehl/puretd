@@ -8,6 +8,7 @@
  */
 
 #include "nn_eval.h"
+#include "prob5_sanity.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -262,40 +263,16 @@ static const float *forward_raw(const NNModel *model, const float *input) {
     return in;
 }
 
-/* gnubg 1.08 SanityCheck "impossible" rules on a perspective196 input:
- * zero the P(wg), P(wbg), P(lg), P(lbg) the board rules out. Same code
- * as bg_engine.c prob5_impossible_mask (prob_agent.prob5_impossible);
- * parity: tests/test_prob5_sanity.py TestCCopiesParity. */
+/* Zero the P(wg), P(wbg), P(lg), P(lbg) the board rules out
+ * (prob5_sanity.h). */
 static void prob5_sanity_zero(const float *x, float *p) {
-    /* s = 0: my side (gnubg side 1), 1: the opponent (gnubg side 0) */
-    int ac[2], back[2], cross[2], gcross[2];
-    for (int s = 0; s < 2; s++) {
-        const float *b = x + 98 * s;
-        ac[s] = cross[s] = back[s] = 0;
-        gcross[s] = 1;
-        for (int k = 0; k < 24; k++) {
-            const float *f = b + 4 * k;
-            if (f[0] == 0.0f) continue;
-            int c = (int)(f[0] + f[1] + f[2] + 2.0f * f[3] + 0.5f);
-            int i = s ? 23 - k : k;          /* gnubg point index */
-            if (i > back[s]) back[s] = i;
-            ac[s] += c;
-            cross[s] += (1 + i / 6) * c;
-            gcross[s] += (i / 6) * c;
-        }
-        int bar = (int)(2.0f * b[96] + 0.5f);
-        if (bar) {
-            back[s] = 24; ac[s] += bar; cross[s] += 5 * bar; gcross[s] += 4 * bar;
-        }
-    }
-    int race = back[0] + back[1] < 24;
-    if (ac[1] < 15 || (race && cross[0] > 8 * gcross[1])) p[1] = 0.0f;
-    if (ac[1] < 15 || (race && back[1] < 18)) p[2] = 0.0f;
-    if (ac[0] < 15 || (race && cross[1] > 8 * gcross[0] - 4)) p[3] = 0.0f;
-    if (ac[0] < 15 || (race && back[0] < 18)) p[4] = 0.0f;
+    unsigned char m[4];
+    if (!prob5_ruled_out(x, m)) return;
+    for (int j = 0; j < 4; j++)
+        if (m[j]) p[j + 1] = 0.0f;
 }
 
-/* prob5: SanityCheck zeroing if `sanity`, the nested-event clamps, then
+/* prob5: board-sanity zeroing if `sanity`, the nested-event clamps, then
  * money equity. Mirrors prob_agent.prob5_sanity (sanity) or
  * model.prob5_postprocess, then model.prob5_to_equity. `out`, if
  * non-NULL, receives the 5 probs. */

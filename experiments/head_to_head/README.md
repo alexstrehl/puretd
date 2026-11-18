@@ -16,16 +16,19 @@ within the reported CI, it does not replay the games.
   `stage11`. `opensage-native` also needs the native library:
   `bash third_party_opponents/opensage/opensage_mobile_build.sh`.
 - gnubg 1.08.003 for the `gnubg-ext*` sides: `apt install gnubg` on a release
-  that ships 1.08.003 (Ubuntu 26.04), or a build from GNU source. `GNUBG_CMD`
-  names the binary when it is not `/usr/games/gnubg`. 1.06 and 1.07 carry
-  different nets: `md5sum /usr/share/gnubg/gnubg.wd` must be
-  `14184acc9c60ef67be0fad88548fd51a`.
-- PureTD:
-  [best_models/cubeless_prob5_512_512_256_256.pt](../../best_models/cubeless_prob5_512_512_256_256.pt)
-  (md5 `88b03c1c`) and
-  [best_models/cubeful_money_512_512_256_256.pt](../../best_models/cubeful_money_512_512_256_256.pt)
-  (md5 `4e25e4f7`). Every `.npz` and CSV row carries the side's md5, and
-  `--combine` refuses to pool across md5s.
+  that ships 1.08.003 (Ubuntu 26.04; Ubuntu 24.04 ships 1.07.001), or the
+  benchmark build, which also serves here:
+  `bash third_party_opponents/gnubg/gnubg_bench/build.sh $HOME/gnubg-bench`
+  and `GNUBG_CMD=$HOME/gnubg-bench/bin/gnubg`. `GNUBG_CMD` names the binary
+  when it is not `/usr/games/gnubg`. 1.06 and 1.07 carry different nets:
+  `gnubg.wd` (`/usr/share/gnubg/` or `$HOME/gnubg-bench/share/gnubg/`) must
+  have md5 `14184acc9c60ef67be0fad88548fd51a`.
+- PureTD: the rows below measured the 4-layer nets
+  [best_models/history/cubeless_prob5_512_512_256_256_ac95a983.pt](../../best_models/history/cubeless_prob5_512_512_256_256_ac95a983.pt)
+  (md5 `ac95a983`) and
+  [best_models/history/cubeful_money_512_512_256_256_6afda0f8.pt](../../best_models/history/cubeful_money_512_512_256_256_6afda0f8.pt)
+  (md5 `6afda0f8`), which the commands name. Every `.npz` and CSV row
+  carries the side's md5, and `--combine` refuses to pool across md5s.
 
 ```bash
 bash c_engine/build_unix.sh                       # c_engine/libbg_engine.so
@@ -41,7 +44,7 @@ bearoff database; DMP: `MultiPlyStrategy` win probability), `opensage-native` (c
 and 1-ply: Sage's native C API), `opensage-analyzer` (cubeful money:
 Sage's `BgBotAnalyzer`, same decisions, needed for 2-ply;
 [OPENSAGE.md](OPENSAGE.md)), `hedgehog:<model.ogxf>`
-([HEDGEHOG.md](HEDGEHOG.md)), `janowski:<prob5.pt>` and `bo:<cubeful.pt>`
+([HEDGEHOG.md](HEDGEHOG.md)), `janowski:<prob5.pt>`
 (cubeful money; [../janowski/README.md](../janowski/README.md)), `random`.
 `--plies` is gnubg's depth.
 `--sage-plies` is XG-numbered: 1 = 0-ply, 2 = 1-ply. `SAGE_UNPRUNED=1`
@@ -70,19 +73,19 @@ for the move-filter table.
 
 ```bash
 # PureTD 0-ply vs gnubg 0-ply
-python experiments/head_to_head/run.py --side1 best_models/cubeless_prob5_512_512_256_256.pt \
+python experiments/head_to_head/run.py --side1 best_models/history/cubeless_prob5_512_512_256_256_ac95a983.pt \
   --side2 gnubg-ext --plies 0 --game-mode cubeless-money --games 1000000 --workers 48
 
 # PureTD 0-ply vs gnubg 1-ply
-python experiments/head_to_head/run.py --side1 best_models/cubeless_prob5_512_512_256_256.pt \
+python experiments/head_to_head/run.py --side1 best_models/history/cubeless_prob5_512_512_256_256_ac95a983.pt \
   --side2 gnubg-ext --plies 1 --game-mode cubeless-money --games 1000000 --workers 48
 
 # PureTD 0-ply vs Open Sage 0-ply
-python experiments/head_to_head/run.py --side1 best_models/cubeless_prob5_512_512_256_256.pt \
+python experiments/head_to_head/run.py --side1 best_models/history/cubeless_prob5_512_512_256_256_ac95a983.pt \
   --side2 opensage --sage-plies 1 --game-mode cubeless-money --games 1000000 --workers 48
 
 # PureTD 0-ply vs Open Sage 1-ply
-python experiments/head_to_head/run.py --side1 best_models/cubeless_prob5_512_512_256_256.pt \
+python experiments/head_to_head/run.py --side1 best_models/history/cubeless_prob5_512_512_256_256_ac95a983.pt \
   --side2 opensage --sage-plies 2 --game-mode cubeless-money --games 1000000 --workers 48
 ```
 
@@ -90,27 +93,27 @@ python experiments/head_to_head/run.py --side1 best_models/cubeless_prob5_512_51
 
 ```bash
 # PureTD 0-ply vs gnubg 0-ply
-python experiments/head_to_head/run.py --side1 best_models/cubeful_money_512_512_256_256.pt \
+python experiments/head_to_head/run.py --side1 best_models/history/cubeful_money_512_512_256_256_6afda0f8.pt \
   --side2 gnubg-ext --plies 0 --game-mode cubeful-money --jacoby --log-runaway 256 \
   --games 1000000 --workers 48
 
 # PureTD 0-ply vs gnubg 1-ply
-python experiments/head_to_head/run.py --side1 best_models/cubeful_money_512_512_256_256.pt \
+python experiments/head_to_head/run.py --side1 best_models/history/cubeful_money_512_512_256_256_6afda0f8.pt \
   --side2 gnubg-ext --plies 1 --game-mode cubeful-money --jacoby --log-runaway 256 \
   --games 1000000 --workers 48
 
 # PureTD 0-ply vs gnubg 2-ply
-python experiments/head_to_head/run.py --side1 best_models/cubeful_money_512_512_256_256.pt \
+python experiments/head_to_head/run.py --side1 best_models/history/cubeful_money_512_512_256_256_6afda0f8.pt \
   --side2 gnubg-ext --plies 2 --game-mode cubeful-money --jacoby --log-runaway 256 \
   --games 1000000 --workers 48
 
 # PureTD 0-ply vs Open Sage 0-ply
-python experiments/head_to_head/run.py --side1 best_models/cubeful_money_512_512_256_256.pt \
+python experiments/head_to_head/run.py --side1 best_models/history/cubeful_money_512_512_256_256_6afda0f8.pt \
   --side2 opensage-native --sage-plies 1 --game-mode cubeful-money --jacoby --log-runaway 256 \
   --games 1000000 --workers 48
 
 # PureTD 0-ply vs Open Sage 1-ply (no pruning setting)
-python experiments/head_to_head/run.py --side1 best_models/cubeful_money_512_512_256_256.pt \
+python experiments/head_to_head/run.py --side1 best_models/history/cubeful_money_512_512_256_256_6afda0f8.pt \
   --side2 opensage-native --sage-plies 2 --game-mode cubeful-money --jacoby --log-runaway 256 \
   --games 1000000 --workers 48
 ```
@@ -119,15 +122,15 @@ python experiments/head_to_head/run.py --side1 best_models/cubeful_money_512_512
 
 ```bash
 # PureTD 0-ply vs gnubg 1-ply unpruned, cubeless
-python experiments/head_to_head/run.py --side1 best_models/cubeless_prob5_512_512_256_256.pt \
+python experiments/head_to_head/run.py --side1 best_models/history/cubeless_prob5_512_512_256_256_ac95a983.pt \
   --side2 gnubg-ext-full --plies 1 --game-mode cubeless-money --games 1000000 --workers 48
 
 # PureTD 0-ply vs Open Sage 1-ply unpruned, cubeless
-SAGE_UNPRUNED=1 python experiments/head_to_head/run.py --side1 best_models/cubeless_prob5_512_512_256_256.pt \
+SAGE_UNPRUNED=1 python experiments/head_to_head/run.py --side1 best_models/history/cubeless_prob5_512_512_256_256_ac95a983.pt \
   --side2 opensage --sage-plies 2 --game-mode cubeless-money --games 1000000 --workers 48
 
 # PureTD 0-ply vs gnubg 1-ply unpruned, cubeful
-python experiments/head_to_head/run.py --side1 best_models/cubeful_money_512_512_256_256.pt \
+python experiments/head_to_head/run.py --side1 best_models/history/cubeful_money_512_512_256_256_6afda0f8.pt \
   --side2 gnubg-ext-full --plies 1 --game-mode cubeful-money --jacoby --log-runaway 256 \
   --games 1000000 --workers 48
 ```
@@ -141,8 +144,9 @@ python experiments/head_to_head/run.py --combine DIR
 
 ## Luck-adjusted scoring (`variance.py`)
 
-`variance.py` plays cubeless or cubeful money on paired dice (the two games
-of a pair use the same dice with the seats swapped) and subtracts each
+`variance.py` plays cubeless or cubeful money in pairs of games with the
+seats swapped, on paired dice (default: both games use the same dice) or
+independent dice (`--dice independent`), and subtracts each
 game's dice luck as judged by a fixed PureTD reference net: on every turn
 after the opening roll, the reference's value of the roll that came up
 minus its average over the 21 possible rolls. The correction has mean
@@ -150,7 +154,9 @@ zero, so the adjusted mean estimates the same mEq/game as plain games with
 a much smaller confidence interval. Sides are PureTD checkpoints at 0-ply
 or 1-ply (`--oneply1`, `--oneply2`; 1-ply uses the `PURETD_ROOT_FILTER`
 root filter, recorded in the output) or `gnubg-ext`, `gnubg-ext-full`,
-`gnubg-ext-rootfull` at `--plies 0..4`. The reference (`--reference`,
+`gnubg-ext-rootfull` at `--plies 0..4`; in cubeful money also
+`janowski:<prob5.pt>` (Prob5Jan; `JANOWSKI_X` and `JANOWSKI_BOARD_SANITY`
+as in `run.py`, recorded). The reference (`--reference`,
 default the production 4-layer net of the game mode) must be a PureTD
 money net.
 
@@ -160,7 +166,7 @@ python experiments/head_to_head/variance.py --pairs 10000 --workers 16 \
   --seed 20261024 --out DIR/pilot_4l.npz
 
 # Cubeful money (Jacoby on; --no-jacoby for the variant) vs gnubg 0-ply,
-# luck reference = the former production net, as in the top README.
+# luck reference = 6afda0f8, as in the top README.
 python experiments/head_to_head/variance.py --game-mode cubeful-money \
   --side1 best_models/cubeful_money_512_512_256_256.pt --side2 gnubg-ext --plies 0 \
   --reference best_models/history/cubeful_money_512_512_256_256_6afda0f8.pt \
@@ -181,8 +187,8 @@ them.
 ## Results
 
 mEq/game from PureTD's perspective (positive = PureTD ahead), with bootstrap
-95% CIs. Rows measure the former production nets `6afda0f8` (cubeful) and
-`ac95a983` (prob5), now in `best_models/history/`. Luck-adjusted gnubg rows
+95% CIs. Rows measure `6afda0f8` (cubeful) and `ac95a983` (prob5), as in
+Requirements. Luck-adjusted gnubg rows
 for the current nets are in the [top README](../../README.md).
 1-ply baselines use their default move pruning. Cubeful rows are the capped (±128) mean, Jacoby on. Summaries:
 [results/h2h_cubeless_summary.csv](results/h2h_cubeless_summary.csv),

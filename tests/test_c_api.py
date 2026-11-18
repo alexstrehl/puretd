@@ -1087,8 +1087,8 @@ def test_bench_smoke(P, backend):
 
 def test_bench_selfplay_counts_exclude_passes(P, backend):
     """bgc_bench_selfplay counts a checker decision per turn with a legal
-    play (forced passes excluded, as gnubg counts) plus offers and
-    responses: the per-game counts equal the recorded games' ones."""
+    play (forced passes excluded) plus offers and responses: the per-game
+    counts equal the recorded games' ones."""
     e = engine(P, backend, PROD_CUBEFUL)
     for cube_on in (False, True):
         opts = P.game_opts(cubeful=True, jacoby=True, cube_enabled=cube_on,

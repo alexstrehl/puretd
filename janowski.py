@@ -1,8 +1,7 @@
 """janowski.py -- Janowski cube formulas over nested 5-outcome probabilities.
 
-Formulas: R. Janowski, "Take-Points in Money Games" (1993). Reference
-implementation: GNU Backgammon 1.08 (eval.c). Independent implementation;
-no gnubg source is included.
+Formulas: R. Janowski, "Take-Points in Money Games" (1993), in GNU
+Backgammon's formulation (dead/live blend, piecewise-linear live curve).
 
 Converts prob5's nested P(win), P(wg), P(wbg), P(lg), P(lbg) (on-roll
 view) into cubeful money equity at a cube perspective:
@@ -10,8 +9,9 @@ view) into cubeful money equity at a cube perspective:
     E_cubeful = (1 - x) * E_dead + x * E_live
 
 E_dead is the cubeless money equity (Jacoby-aware on a centered cube),
-E_live Janowski's live-cube equity, piecewise-linear in p with knots at
-the live take and cash points, x the cube-life index (DEFAULT_X).
+E_live GNU Backgammon's live-cube curve, piecewise-linear in p through
+(0,-L), (TP,-1), (CP,+1), (1,W) at Janowski's live take and cash points,
+x the cube-life index (DEFAULT_X).
 
 Every public function is vectorized: `probs` is (..., 5); `x` is a
 scalar or an array broadcastable to the leading shape.

@@ -2,11 +2,14 @@
 
 Adapters that put other backgammon engines behind the `Agent` interface, for
 head-to-head play (`play_models.py`, `experiments/head_to_head/run.py`) and
-the fixed-pool benchmarks (`experiments/benchmarks/`). No third-party source
-code or weights are included: each engine is installed or built from its own
-pinned release. An adapter is imported only when a side spec names its
-engine. The adapters are MIT (root `LICENSE`) except the two files marked
-below.
+the fixed-pool benchmarks (`experiments/benchmarks/`). No third-party engines
+or weights are included, apart from the gnubgmodule.c lines in benchpool.patch
+and the two files adapted from Open Sage (below); each engine is installed or
+built from its own pinned release. An adapter is imported only when a side spec names its
+engine. The adapters are MIT (root `LICENSE`) except three files:
+`gnubg/gnubg_bench/benchpool.patch` (GPL-3.0-or-later; it modifies GNU
+Backgammon) and `opensage/opensage_bench/sage_bench.cpp` and
+`sage_filt_check.cpp` (MPL-2.0; adapted from Open Sage).
 
 ## gnubg
 
@@ -15,8 +18,8 @@ Pinned: gnubg 1.08.003.
 
 - `gnubg_external.py`: the gnubg binary over its external-player socket
   (gnubg's own checker play and money cube, Jacoby).
-- `gnubg_nn_agent.py`: `gnubg-nn` (`pip install gnubg-nn`), a cube-blind
-  approximation for sanity checks only.
+- `gnubg_nn_agent.py`: `gnubg-nn` (`pip install gnubg-nn`, GPL-3.0,
+  optional), a cube-blind approximation for sanity checks only.
 - `gnubg_eval.py`: game recording, `.mat` export, binary preflight
   (version, weights md5, bearoff database).
 - `fixedpool_bench_gnubg.py`: fixed-pool benchmark, run inside the gnubg
@@ -24,10 +27,12 @@ Pinned: gnubg 1.08.003.
 - `gnubg_bench/benchpool.patch` (GPL-3.0-or-later, see its header) and
   `build.sh`: a threads-disabled gnubg with the `gnubg.benchpool` timing loop.
 
-Install: `apt install gnubg` on a release that ships 1.08.003, or a build from
-GNU source; `GNUBG_CMD` names the binary when it is not `/usr/games/gnubg`.
-Benchmark build: `bash third_party_opponents/gnubg/gnubg_bench/build.sh
-$HOME/gnubg-bench` (needs flex, bison, glib, python3 headers).
+Install: `apt install gnubg` on a release that ships 1.08.003 (Ubuntu 24.04
+ships 1.07.001), or the benchmark build; `GNUBG_CMD` names the binary when it
+is not `/usr/games/gnubg`. Benchmark build: `bash
+third_party_opponents/gnubg/gnubg_bench/build.sh $HOME/gnubg-bench` (needs
+flex, bison, glib, python3 headers); `GNUBG_CMD=$HOME/gnubg-bench/bin/gnubg`
+uses it for the `gnubg-ext*` sides too.
 
 Side specs: `gnubg-ext` (production pruning nets and move filter),
 `gnubg-ext-full` (no pruning, every legal move evaluated), `gnubg-ext-rootfull`
@@ -66,12 +71,14 @@ Side spec: `hedgehog:<model.ogxf>`, money modes only; `--oneply1` /
 
 [Open Sage](https://github.com/markbgsage/bgsage) (bgsage), MPL-2.0 (tag `v2.0.20260907`).
 Pinned: bgsage 2.0.20260907 (tag `v2.0.20260907`, model `stage11`); 1.x gives
-different rows.
+different rows, and releases before 1.5 are AGPL-3.0-or-later.
 
 - `opensage/opensage_agents.py`: agents over the `bgsage` Python package.
 - `opensage/opensage_mobile.py`, `opensage_mobile_build.sh`: agent over Open
   Sage's native C API (`libbgsage_mobile.so`, `$BGSAGE_MOBILE_LIB` overrides).
-- `opensage/opensage_bench/`: `sage_bench.cpp` (links Open Sage), its CMake file and `build.sh`, the fixed-pool benchmark loops.
+- `opensage/opensage_bench/`: `sage_bench.cpp`, the fixed-pool benchmark loops, and
+  `sage_filt_check.cpp`, the pruned-chooser agreement check (both MPL-2.0,
+  adapted from Open Sage's `cpp/src/mobile.cpp`); its CMake file and `build.sh`.
 
 Install: `pip install bgsage==2.0.20260907`. Native C API:
 `bash third_party_opponents/opensage/opensage_mobile_build.sh`. Benchmark

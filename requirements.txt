@@ -5,7 +5,6 @@
 # Verified environment below).
 torch==2.13.0
 numpy==2.2.6
-gnubg-nn==1.1.0a8
 
 # Tests: `python -m pytest -q tests/`. markdown-it-py serves only
 # tests/test_readme_markdown.py, which skips its rendering check without it.
@@ -15,15 +14,19 @@ markdown-it-py==4.2.0
 # Optional. scipy is used only by play_models.compute_binomial_pvalue, which
 # falls back to a normal approximation when it is absent (and IS absent in the
 # environment below, so that fallback is the tested path). bgsage is imported
-# lazily, for Open Sage sides and benchmark rows only.
+# lazily, for Open Sage sides and benchmark rows only; gnubg-nn (GPL-3.0), for
+# gnubg-nn sides only (1.1.0a8 recorded the cubeless benchmark pool).
 # scipy
 # bgsage==2.0.20260907
+# gnubg-nn==1.1.0a8
 
 # Plus, for the paper's gnubg-ext opponents:
 #   GNU Backgammon 1.08.003 binary (weights md5 14184acc...) on PATH or GNUBG_CMD
 #
-# Package-manager gnubg versions vary: recent Debian/Ubuntu ship 1.08.003
-# (Ubuntu 26.04 does), older releases ship 1.06/1.07, whose nets differ.
+# Package-manager gnubg versions vary: Ubuntu 26.04 ships 1.08.003, Ubuntu
+# 24.04 ships 1.07.001 and older releases 1.06, whose nets differ. Without a
+# 1.08.003 package, build third_party_opponents/gnubg/gnubg_bench/build.sh
+# and set GNUBG_CMD to its bin/gnubg.
 # The runtime preflight verifies version + weights md5 and refuses anything
 # but 1.08.003. Set GNUBG_CMD if the /usr/games/gnubg default holds a
 # different build. The behavioural tests skip when no gnubg is installed.

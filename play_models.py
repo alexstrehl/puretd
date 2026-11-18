@@ -79,7 +79,7 @@ _JAN_C_UNSUPPORTED = ("JANOWSKI_NO_FOLD", "JANOWSKI_NO_FOLD_0PLY",
 def _load_c_janowski(path: str, oneply: bool = False, backend: str = None,
                      bf16: bool = False) -> Agent:
     """The C API Prob5Jan agent (janowski-c:, or janowski: on the C path):
-    JANOWSKI_X, JANOWSKI_BOARD_SANITY and JANOWSKI_NO_BEAROFF honoured; the
+    JANOWSKI_X and JANOWSKI_BOARD_SANITY honoured; the
     ablations and bf16 it lacks raise."""
     for k in _JAN_C_UNSUPPORTED:
         if os.environ.get(k, "0") == "1":
@@ -93,8 +93,7 @@ def _load_c_janowski(path: str, oneply: bool = False, backend: str = None,
     return CAgent(path, plies=1 if oneply else 0, backend=play_backend(backend),
                   janowski=True,
                   x=float(x_env) if x_env else None,
-                  board_sanity=board_sanity_from_env("JANOWSKI_BOARD_SANITY", True),
-                  bearoff=os.environ.get("JANOWSKI_NO_BEAROFF", "0") != "1")
+                  board_sanity=board_sanity_from_env("JANOWSKI_BOARD_SANITY", True))
 
 
 def _c_api_game(agent_white, agent_black, cubeful, jacoby, dice_rng):
@@ -327,15 +326,14 @@ def _is_prob5_checkpoint(path) -> bool:
 
 
 def _check_side_depth(spec, spec_type, twoply_k):
-    if twoply_k and spec_type in ("janowski", "janowski-c", "bo"):
+    if twoply_k and spec_type in ("janowski", "janowski-c"):
         raise ValueError(f"{spec}: {spec_type}: sides support 0-ply and "
                          f"1-ply only (got twoply_k={twoply_k})")
 
 
 def preflight_side(spec, spec_type, *, twoply_k=0):
     """Reject, before any game, a side that cannot be played as asked:
-    an unsupported depth, janowski:/janowski-c:/bo: without the bearoff
-    tables, a gnubg-ext* side on a gnubg other than the pinned one, or an
+    an unsupported depth, a gnubg-ext* side on a gnubg other than the pinned one, or an
     opensage* side on another bgsage than SAGE_VERSION (RuntimeError)."""
     _check_side_depth(spec, spec_type, twoply_k)
     if twoply_k and spec_type == "model" and _is_prob5_checkpoint(spec):
@@ -350,11 +348,6 @@ def preflight_side(spec, spec_type, *, twoply_k=0):
     if spec_type in ("opensage", "opensage-analyzer", "opensage-native"):
         from third_party_opponents.opensage.opensage_agents import assert_sage_version
         assert_sage_version()
-    if spec_type == "bo" or (
-            spec_type in ("janowski", "janowski-c")
-            and os.environ.get("JANOWSKI_NO_BEAROFF", "0") != "1"):
-        import bearoff
-        bearoff.preflight()
 
 
 # Side types the C API plays (CAgent) unless --python-api.
@@ -421,7 +414,7 @@ def _build_side(spec, spec_type, *, plies, sage_plies, cubeless_money,
     `spec_type` is "model" (`spec` is a checkpoint path), "random",
     "hedgehog" (`spec` is ``hedgehog:<model.ogxf>``), "janowski"
     (``janowski:<prob5.pt>``; with `c_api` the C engine), "janowski-c"
-    (``janowski-c:<prob5.pt>``, the C engine), "bo" (``bo:<cubeful.pt>``), or an engine
+    (``janowski-c:<prob5.pt>``, the C engine), or an engine
     keyword: "gnubg-nn", "gnubg-ext", "gnubg-ext-full",
     "gnubg-ext-rootfull", "opensage", "opensage-analyzer". `plies` is
     gnubg's depth; `sage_plies` is Open Sage's ply (1 = 0-ply,
@@ -495,13 +488,6 @@ def _build_side(spec, spec_type, *, plies, sage_plies, cubeless_money,
         return HedgehogAgent(spec.split(":", 1)[1],
                              depth=2 if twoply_k else (1 if oneply else 0))
     _check_side_depth(spec, spec_type, twoply_k)
-    if spec_type == "bo":
-        # Cubeful TDAgent + exact bearoff routing, the Janowski
-        # comparison's PureTD side (experiments/janowski/README.md).
-        if not cubeful:
-            raise ValueError("bo: sides are cubeful-money only")
-        from bearoff_td import BearoffTDAgent
-        return BearoffTDAgent(load_model(spec.split(":", 1)[1]), oneply=oneply)
     if spec_type == "janowski-c" or (spec_type == "janowski" and c_api):
         if not cubeful:
             raise ValueError(f"{spec_type}: sides are cubeful-money only")
@@ -512,8 +498,8 @@ def _build_side(spec, spec_type, *, plies, sage_plies, cubeless_money,
         # recorded in the npz: JANOWSKI_X (cube-life index; unset =
         # janowski.DEFAULT_X), JANOWSKI_NO_FOLD=1 (no opponent-cube
         # fold in checker play), JANOWSKI_NO_FOLD_0PLY=1 (no 0-ply fold),
-        # JANOWSKI_CUBELESS_CHECKER=1, JANOWSKI_NO_BEAROFF=1,
-        # JANOWSKI_BOARD_SANITY=0 (no prob5_sanity).
+        # JANOWSKI_CUBELESS_CHECKER=1, JANOWSKI_BOARD_SANITY=0 (no
+        # prob5_sanity).
         if not cubeful:
             raise ValueError(
                 "janowski: sides are cubeful-money only; use the bare "
@@ -531,7 +517,6 @@ def _build_side(spec, spec_type, *, plies, sage_plies, cubeless_money,
             fold_0ply=os.environ.get("JANOWSKI_NO_FOLD_0PLY", "0") != "1",
             cubeless_checker=os.environ.get(
                 "JANOWSKI_CUBELESS_CHECKER", "0") == "1",
-            bearoff_exact=os.environ.get("JANOWSKI_NO_BEAROFF", "0") != "1",
             board_sanity=board_sanity_from_env("JANOWSKI_BOARD_SANITY", True),
         )
     if c_api:
@@ -1123,7 +1108,7 @@ def _reject_legacy_gnubg(spec):
 def _detect_side_type(spec):
     """Side spec -> type. ``hedgehog:<model.ogxf>`` is "hedgehog",
     ``janowski:<prob5.pt>`` "janowski", ``janowski-c:<prob5.pt>``
-    "janowski-c", ``bo:<cubeful.pt>`` "bo".
+    "janowski-c".
     Otherwise an existing file is always "model" (even one named like an
     engine). Engine keywords map to themselves. Anything else is
     "model". Pass model*_type explicitly to override. Bare 'gnubg' is
@@ -1134,8 +1119,6 @@ def _detect_side_type(spec):
         return "janowski"
     if spec.startswith("janowski-c:"):
         return "janowski-c"
-    if spec.startswith("bo:"):
-        return "bo"
     if os.path.exists(spec):
         return "model"
     _reject_legacy_gnubg(spec)
@@ -1183,7 +1166,7 @@ def _side_depth_desc(spec_type, *, oneply, twoply_k, plies, sage_plies,
     if spec_type == "model" and c_api and oneply and not twoply_k:
         from c_api.puretd_py import root_filter_from_env, search_desc
         return " ".join(filter(None, ("1ply", search_desc(root_filter_from_env()))))
-    if spec_type in ("model", "janowski", "janowski-c", "bo"):
+    if spec_type in ("model", "janowski", "janowski-c"):
         return (f"twoply-k{twoply_k}" if twoply_k
                 else ("1ply" if oneply else "0ply"))
     return ""
@@ -1204,8 +1187,8 @@ def save_head_to_head(out_dir, per_game, *, game_mode, side1, side2, n_games,
     write only the base fields.
 
     ``side*_depth`` (:func:`_side_depth_desc`), ``cube_cap`` ("" =
-    uncapped), ``jacoby``, ``bf16`` and, with a ``janowski:``/``bo:`` side,
-    the JANOWSKI_* settings and ``janowski_rev`` are pooling identity:
+    uncapped), ``jacoby``, ``bf16`` and, with a ``janowski:`` side, the
+    JANOWSKI_* settings and ``janowski_rev`` are pooling identity:
     combine refuses runs that differ. ``prob5_board_sanity`` ("1" only
     when a plain prob5 side ran with PROB5_BOARD_SANITY=1) and, with a
     ``janowski:`` side, ``janowski_board_sanity`` are pooling identity
@@ -1250,7 +1233,6 @@ def save_head_to_head(out_dir, per_game, *, game_mode, side1, side2, n_games,
         janowski_no_fold_0ply=os.environ.get("JANOWSKI_NO_FOLD_0PLY", "0"),
         janowski_cubeless_checker=os.environ.get(
             "JANOWSKI_CUBELESS_CHECKER", "0"),
-        janowski_no_bearoff=os.environ.get("JANOWSKI_NO_BEAROFF", "0"),
         # Model identity (promotions overwrite paths in place);
         # combine_head_to_head refuses mismatched md5s.
         side1_md5=side_model_md5(side1),
@@ -1288,7 +1270,7 @@ def _hh_shim_provenance(*sides) -> dict:
 def _c_api_provenance(c_api, backend, *sides) -> dict:
     """npz fields of the play path: ``c_api`` "1"/"0"; with it or a janowski-c:
     side, the resolved backend and the engine's describe string (ISA) for
-    the first checkpoint side (janowski sides: the path after the colon).
+    the first checkpoint side (janowski: sides: the path after the colon).
     ``sides``: (spec, spec_type) pairs."""
     if not c_api and not any(t == "janowski-c" for _, t in sides):
         return {"c_api": "0"}
@@ -1320,8 +1302,8 @@ def _sage_path(side1, side2, game_mode) -> dict:
 
 
 def _janowski_rev(*sides) -> str:
-    """Play revision of the janowski:/bo: agents ("" for other sides)."""
-    if not any(str(s).startswith(("janowski:", "janowski-c:", "bo:")) for s in sides):
+    """Play revision of the janowski: agents ("" for other sides)."""
+    if not any(str(s).startswith(("janowski:", "janowski-c:")) for s in sides):
         return ""
     from janowski_agent import JANOWSKI_REV
     return JANOWSKI_REV
@@ -1339,21 +1321,14 @@ def _board_sanity_provenance(*sides) -> dict:
     return out
 
 
-# janowski_variant: recorded by runs below _JANOWSKI_1PLY_REV_END only.
+# janowski_variant: present only in npz files from runs with an older JANOWSKI_REV; listed so pooling sees them.
 _JANOWSKI_ENV = ("janowski_x", "janowski_no_fold", "janowski_no_fold_0ply",
-                 "janowski_variant", "janowski_cubeless_checker",
-                 "janowski_no_bearoff")
-
-# 1-ply settings recorded by janowski: runs at JANOWSKI_REV below
-# _JANOWSKI_1PLY_REV_END; an absent field reads as its default.
-_JANOWSKI_1PLY_DEFAULT = {"janowski_1ply_simp": "1",
-                          "janowski_1ply_filter": "8,0.16"}
-_JANOWSKI_1PLY_REV_END = "2026-10-13"
+                 "janowski_variant", "janowski_cubeless_checker")
 
 
 def _config_identity(d, s1, s2) -> dict:
     """Settings that must match for runs to pool. An absent jacoby/bf16
-    pools freely. For janowski:/bo: matchups the JANOWSKI_* settings and
+    pools freely. For janowski: matchups the JANOWSKI_* settings and
     janowski_rev count even when absent. An absent prob5_board_sanity
     reads "0", an absent janowski_board_sanity "1"."""
     out = {}
@@ -1376,19 +1351,12 @@ def _config_identity(d, s1, s2) -> dict:
     if "opensage" in (s1, s2):
         out["sage_path"] = (str(d["sage_path"]) if "sage_path" in d
                             else "best_move_index")
-    if any(x.startswith(("janowski:", "janowski-c:", "bo:")) for x in (s1, s2)):
-        out["janowski_rev"] = str(d["janowski_rev"]) if "janowski_rev" in d else ""
     if any(x.startswith(("janowski:", "janowski-c:")) for x in (s1, s2)):
+        out["janowski_rev"] = str(d["janowski_rev"]) if "janowski_rev" in d else ""
         for k in _JANOWSKI_ENV:
             out[k] = str(d[k]) if k in d else ""
         out["janowski_board_sanity"] = (str(d["janowski_board_sanity"])
                                         if "janowski_board_sanity" in d else "1")
-    # 1-ply-only settings: 0-ply runs pool whatever they record.
-    if any(x.startswith(("janowski:", "janowski-c:")) and k in d and str(d[k]) == "1ply"
-           for x, k in ((s1, "side1_depth"), (s2, "side2_depth"))) \
-            and out["janowski_rev"] < _JANOWSKI_1PLY_REV_END:
-        for k, dflt in _JANOWSKI_1PLY_DEFAULT.items():
-            out[k] = str(d[k]) if k in d else dflt
     return out
 
 
@@ -1653,7 +1621,7 @@ def main():
         type=str,
         default=None,
         help="Path to second model (.pt file), a side spec (janowski:<prob5.pt>, "
-             "janowski-c:<prob5.pt> = Prob5Jan in the C API, bo:<cubeful.pt>, "
+             "janowski-c:<prob5.pt> = Prob5Jan in the C API, "
              "hedgehog:<model.ogxf>), an engine keyword, or 'random' "
              "(optional if --random is set)",
     )

@@ -20,5 +20,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-MIT, except third_party_opponents/gnubg/gnubg_bench/benchpool.patch, which
-modifies GNU Backgammon and is GPL-3.0-or-later (see its header).
+MIT, except third_party_opponents/gnubg/gnubg_bench/benchpool.patch
+(GPL-3.0-or-later; it modifies GNU Backgammon) and
+third_party_opponents/opensage/opensage_bench/sage_bench.cpp and
+sage_filt_check.cpp (MPL-2.0; adapted from Open Sage). See each file's header.
+
+c_api/puretd.c contains MT19937 code (Matsumoto and Nishimura) and
+cuda_graph_step.py contains Adam-step code from PyTorch, each under the
+BSD-3-Clause notice in that file (MIT-compatible).

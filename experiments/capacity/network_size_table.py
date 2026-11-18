@@ -6,9 +6,10 @@
     python experiments/capacity/network_size_table.py --dat     # results/capacity_{cubeful,prob5}.dat
 
 Head-to-head cells: experiments/head_to_head/results/h2h_experimental_vs_prod.csv.
-Decisions/s: experiments/benchmarks/results/<host>_20261014/fast/capacity_sweep*.txt, mean
-over the sweeps of each host. Cost factor = production net's checker
-dec/s over the row's, same backend and host. A row without sweeps prints
+Decisions/s: experiments/benchmarks/results/<host>_20261113/fast/capacity_sweep*.txt, mean
+over the sweeps of each host. Cost factor = the 4-layer reference net's
+(best_models/history/…_6afda0f8 cubeful, …_ac95a983 prob5) checker dec/s
+over the row's, same backend and host. A row without sweeps prints
 "pending".
 """
 import argparse
@@ -26,8 +27,8 @@ from aggregate_sweeps import parse, t_crit  # noqa: E402
 
 H2H = os.path.join(_REPO, "experiments", "head_to_head", "results", "h2h_experimental_vs_prod.csv")
 SWEEPS = os.path.join(_REPO, "experiments", "benchmarks", "results")
-HOSTS = {"zen5": "zen5_9700x", "zen3": "zen3_5950x"}
-RUN = "20261014"
+HOSTS = {"zen5": "zen5_9600x", "zen3": "zen3_5950x"}
+RUN = "20261113"
 
 # (family, row name, figure label, side1 in the CSV or None for production,
 #  model file, hidden layers, capacity_costbench.py label)
@@ -38,8 +39,8 @@ ROWS = [
      "best_models/experimental/small_models/cubeful_money_512_512.pt", "[512,512]", "cfs-2L"),
     ("cubeful", "3-layer", "3L", "cubeful_money_512_512_256",
      "best_models/experimental/small_models/cubeful_money_512_512_256.pt", "[512,512,256]", "cf3L-mod"),
-    ("cubeful", "4-layer (production)", "4L", None,
-     "best_models/cubeful_money_512_512_256_256.pt", "[512,512,256,256]", "cf4L"),
+    ("cubeful", "4-layer (reference)", "4L", None,
+     "best_models/history/cubeful_money_512_512_256_256_6afda0f8.pt", "[512,512,256,256]", "cf4L"),
     ("cubeful", "5-layer", "5L", "cubeful_money_512_512_256_256_256",
      "best_models/experimental/cubeful_money_512_512_256_256_256.pt", "[512,512,256,256,256]", "cf5L-f9"),
     ("cubeful", "5-layer wide", "5Lw", "cubeful_money_768_512_256_256_256",
@@ -54,8 +55,8 @@ ROWS = [
      "best_models/experimental/small_models/cubeless_prob5_512_512.pt", "[512,512]", "p5s-2L"),
     ("prob5", "3-layer", "3L", "cubeless_prob5_512_512_256",
      "best_models/experimental/small_models/cubeless_prob5_512_512_256.pt", "[512,512,256]", "p5s-3L"),
-    ("prob5", "4-layer (production)", "4L", None,
-     "best_models/cubeless_prob5_512_512_256_256.pt", "[512,512,256,256]", "p5-4L256"),
+    ("prob5", "4-layer (reference)", "4L", None,
+     "best_models/history/cubeless_prob5_512_512_256_256_ac95a983.pt", "[512,512,256,256]", "p5-4L256"),
     ("prob5", "5-layer", "5L", "cubeless_prob5_512_512_256_256_256",
      "best_models/experimental/cubeless_prob5_512_512_256_256_256.pt", "[512,512,256,256,256]", "p5-5L"),
     ("prob5", "5-layer wide", "5Lw", "cubeless_prob5_768_512_256_256_256",

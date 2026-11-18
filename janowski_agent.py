@@ -13,11 +13,7 @@ at 0-ply and 1-ply:
   * cube actions follow janowski.money_cube_action (TDAgent's rule);
   * 1-ply mirrors TDAgent's cubeful 1-ply: every candidate is expanded
     (no move filter) and per roll each cube branch takes its own best
-    reply, chosen by 0-ply checker play under that branch's cube;
-  * bearoff class: gammon-free positions from the exact tables
-    (bearoff.py, unexpanded at 1-ply), gammonish ones from the exact
-    probabilities through the conversion. Tables must be built first
-    (bearoff.build_table, bearoff.build_ts_table).
+    reply, chosen by 0-ply checker play under that branch's cube.
 
 `cube_fold=False` drops every fold, `fold_0ply=False` only the 0-ply
 checker-play fold.
@@ -37,24 +33,9 @@ from janowski import (DEFAULT_X, cubeless_equity, fold_cube_decision,
 from model import ProbNetwork
 from prob_agent import ProbAgent, _DICE_OUTCOMES
 
-# Recorded in saved H-H runs with a janowski:/bo: side; runs of different
-# revisions refuse to pool. Bump whenever these agents' play changes.
-JANOWSKI_REV = "2026-10-13"
-
-
-def _feature_counts(feats: np.ndarray, offset: int) -> np.ndarray:
-    t = feats[:, offset:offset + 96].reshape(-1, 24, 4)
-    return np.rint(t[..., 0] + t[..., 1] + t[..., 2] + 2.0 * t[..., 3]).astype(np.int64)
-
-
-def _bearoff_class_features(feats: np.ndarray) -> np.ndarray:
-    """bearoff.is_bearoff_class per row of perspective196 features,
-    without building BoardStates."""
-    feats = np.asarray(feats, dtype=np.float64)
-    me = _feature_counts(feats, 0)
-    opp = _feature_counts(feats, 98)          # same frame as `me`
-    no_bar = (np.rint(feats[:, 96] * 2) == 0) & (np.rint(feats[:, 194] * 2) == 0)
-    return no_bar & (me[:, 6:].sum(axis=1) == 0) & (opp[:, :18].sum(axis=1) == 0)
+# Recorded in saved H-H runs with a janowski: side; runs of different
+# revisions refuse to pool. Bump whenever this agent's play changes.
+JANOWSKI_REV = "2026-11-17"
 
 
 def _pick(vals_opp, sec_opp) -> int:
@@ -84,7 +65,6 @@ class JanowskiAgent(ProbAgent):
         cube_fold: bool = True,
         fold_0ply: bool = True,
         cubeless_checker: bool = False,
-        bearoff_exact: bool = True,
         use_fast_engine: bool = True,
         board_sanity: bool = True,
     ):
@@ -106,7 +86,6 @@ class JanowskiAgent(ProbAgent):
         self.cubeless_checker = bool(cubeless_checker)
         if self.cubeless_checker and self.oneply:
             raise ValueError("cubeless_checker ablation is 0-ply only")
-        self.bearoff_exact = bool(bearoff_exact)
 
     def _probs_np(self, t: torch.Tensor) -> np.ndarray:
         return self._probs(t).detach().cpu().numpy().astype(np.float64)
@@ -124,63 +103,34 @@ class JanowskiAgent(ProbAgent):
         owner = match_state.cube_owner if cube_owner is None else cube_owner
         return not (match_state.jacoby and owner == CubeOwner.CENTERED)
 
-    @staticmethod
-    def _bearoff_probs(state: BoardState) -> np.ndarray:
-        """Cubeless probs of a gammon-free bearoff: exact P(win)."""
-        import bearoff
-        p = bearoff.ts_win_prob(state)
-        if p is None:
-            p = float(bearoff.exact_probs5(state)[0])
-        return np.array([p, 0.0, 0.0, 0.0, 0.0])
-
     def _succ_meta(self, feats: np.ndarray, state_at) -> dict:
-        """Class data of successor rows. Materializes the rows the exact
-        tiers need (terminal, bearoff class) now, before any further
+        """Terminal successor rows, materialized now, before any further
         _bg_fast call invalidates `state_at`."""
         term = feats[:, OPP_OFF_INDEX] >= TERMINAL_OFF_THRESHOLD
-        if self.bearoff_exact:
-            bo = _bearoff_class_features(feats) & ~term
-        else:
-            bo = np.zeros_like(term)
-        rows = {int(i): state_at(int(i)) for i in np.flatnonzero(term | bo)}
-        return {"term": term, "bo": bo, "rows": rows}
+        rows = {int(i): state_at(int(i)) for i in np.flatnonzero(term)}
+        return {"term": term, "rows": rows}
 
-    def _succ_values(self, probs: np.ndarray, meta: dict, branches: list,
-                     fold: bool, exact_fold: bool):
+    def _succ_values(self, probs: np.ndarray, meta: dict, branches: list, fold: bool):
         """0-ply values of successor rows for the player on roll there,
         one array per (persp, match_state) of `branches` (on-roll view,
         per unit cube). `fold` folds that player's own cube decision into
-        the Janowski values, `exact_fold` into the exact table values.
+        the Janowski values.
 
         Returns (values, sec, probs, exact): sec the cubeless money
         equity with gammons counted (on-roll view), probs the outcome
-        probabilities used (exact on bearoff and terminal rows), exact the
-        rows that stay unexpanded at 1-ply (terminal, gammon-free table)."""
-        import bearoff
+        probabilities used (exact on terminal rows), exact the rows that
+        stay unexpanded at 1-ply (terminal)."""
         probs = probs.copy()
         exact = meta["term"].copy()
-        table = {}                              # row -> [value per branch]
-        for i in np.flatnonzero(meta["bo"]):
-            s = meta["rows"][int(i)]
-            vals = [bearoff.race_equity(s, persp, with_own_fold=exact_fold)
-                    for persp, _ in branches]
-            if vals[0] is not None:
-                table[int(i)] = vals
-                exact[i] = True
-                probs[i] = self._bearoff_probs(s)
-            else:
-                probs[i] = bearoff.exact_probs5(s)
         raw = {int(i): self._terminal_mag(meta["rows"][int(i)])
                for i in np.flatnonzero(meta["term"])}
         for i, r in raw.items():                # the on-roll player lost
             probs[i] = (0.0, 0.0, 0.0, float(r >= 2), float(r >= 3))
         conv = janowski_equity_folded if fold else janowski_equity
         values = []
-        for b, (persp, ms) in enumerate(branches):
+        for persp, ms in branches:
             v = np.array(conv(probs, persp, self.x, ms.jacoby),
                          dtype=np.float64).reshape(-1)
-            for i, vals in table.items():
-                v[i] = vals[b]
             gammons = self._gammons_count(ms)
             for i, r in raw.items():
                 v[i] = -(r if gammons else 1.0)
@@ -190,13 +140,12 @@ class JanowskiAgent(ProbAgent):
     def _screen_0ply(self, features, succ, opp_persp, match_state):
         """0-ply opponent-view scores of the candidate successors (lower
         is better for the mover), with the opponent's cube decision folded
-        in when fold_0ply (exact table values always fold). Returns
+        in when fold_0ply. Returns
         (eq_opp, exact_mask, sec_opp)."""
         meta = self._succ_meta(features, succ.__getitem__)
         probs = self._probs_np(torch.from_numpy(features))
         values, sec, _, exact = self._succ_values(
-            probs, meta, [(opp_persp, match_state)],
-            fold=self.fold_0ply, exact_fold=True)
+            probs, meta, [(opp_persp, match_state)], fold=self.fold_0ply)
         return values[0], exact, sec
 
     def _screen_scores_0ply(self, features, succ, opp_persp, match_state):
@@ -235,8 +184,7 @@ class JanowskiAgent(ProbAgent):
         off = 0
         for w, n, meta in chunks:
             values, sec, probs, _ = self._succ_values(
-                probs_all[off:off + n], meta, branches,
-                fold=self.cube_fold, exact_fold=self.cube_fold)
+                probs_all[off:off + n], meta, branches, fold=self.cube_fold)
             off += n
             for b in range(len(branch_ms)):
                 j = _pick(values[b], sec)
@@ -265,20 +213,10 @@ class JanowskiAgent(ProbAgent):
 
     def _static_cube(self, state: BoardState, match_state):
         """0-ply (v_no_double, v_double_take, probs) at `state` (pre-roll,
-        state.turn deciding). Bearoff-class positions use the exact
-        tables, or exact probabilities while gammons are possible."""
+        state.turn deciding)."""
         from modes import cube_perspective
         persp = cube_perspective(match_state.cube_owner, state.turn)
-        probs = None
-        if self.bearoff_exact:
-            import bearoff
-            if bearoff.is_bearoff_class(state):
-                vals = bearoff.race_cube_values(state, persp)
-                if vals is not None:
-                    return vals[0], vals[1], self._bearoff_probs(state)
-                probs = bearoff.exact_probs5(state)
-        if probs is None:
-            probs = self._probs_state(state)
+        probs = self._probs_state(state)
         v_nd = float(janowski_equity(probs, persp, self.x, match_state.jacoby))
         # After double-take the cube is the opponent's: THEIRS view.
         v_dt = 2.0 * float(janowski_equity(
@@ -290,19 +228,9 @@ class JanowskiAgent(ProbAgent):
         return self._static_cube(state, match_state)[:2]
 
     def _cube_values(self, state: BoardState, match_state):
-        """(v_no_double, v_double_take, probs) at this agent's depth. A
-        gammon-free bearoff-class root takes the exact tables at 1-ply
-        too."""
+        """(v_no_double, v_double_take, probs) at this agent's depth."""
         if not self.oneply:
             return self._static_cube(state, match_state)
-        from modes import cube_perspective
-        persp = cube_perspective(match_state.cube_owner, state.turn)
-        if self.bearoff_exact:
-            import bearoff
-            if bearoff.is_bearoff_class(state):
-                vals = bearoff.race_cube_values(state, persp)
-                if vals is not None:
-                    return vals[0], vals[1], self._bearoff_probs(state)
         v, probs = self._oneply(
             state, [match_state, match_state.after_take(state.turn)])
         return float(v[0]), 2.0 * float(v[1]), probs
@@ -366,7 +294,7 @@ class JanowskiAgent(ProbAgent):
         if not self.oneply or n == 1:
             return succ[_pick(eq_opp, sec)], None
 
-        # 1-ply: every candidate; exact candidates keep their 0-ply value.
+        # 1-ply: every candidate; game-ending ones keep their 0-ply value.
         scores = np.empty(n)
         sec1 = np.empty(n)
         for j in range(n):

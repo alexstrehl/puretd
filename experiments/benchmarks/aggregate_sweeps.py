@@ -67,6 +67,12 @@ def parse(path):
         if m:
             out["FP " + m.group(1) + " checker"] = float(m.group(2))
             continue
+
+        # fixed-pool native cubeful, checker only: "<engine...>  checker R dec/s ..."
+        m = re.match(r"(.+?)\s+checker\s+([\d.]+) dec/s", ln)
+        if m:
+            out["FP " + m.group(1).strip() + " checker"] = float(m.group(2))
+            continue
     return dict(out)
 
 

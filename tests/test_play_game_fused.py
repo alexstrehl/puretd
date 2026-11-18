@@ -68,7 +68,6 @@ _CF = os.path.join(_ROOT, "best_models", "cubeful_money_512_512_256_256.pt")
 @pytest.mark.skipif(not all(os.path.isfile(p) for p in (_P5, _CM, _CF)),
                     reason="best_models checkpoints missing")
 def test_fused_chooser_scope():
-    from bearoff_td import BearoffTDAgent
     from janowski_agent import JanowskiAgent
     from model import load_model
     from prob_agent import ProbAgent
@@ -83,7 +82,6 @@ def test_fused_chooser_scope():
         TDAgent(cm, oneply=True),
         TDAgent(cm, twoply_k=2),
         TDAgent(cf),
-        BearoffTDAgent(cf),
         JanowskiAgent(p5),
         play_models.RandomAgent(),
     ]

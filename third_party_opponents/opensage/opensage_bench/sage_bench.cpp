@@ -1,7 +1,9 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MPL-2.0
 // Copyright (C) 2026 Alex Strehl
 //
-// Links Open Sage (bgsage v2.0.20260907, MPL-2.0).
+// Adapted from Open Sage (bgsage v2.0.20260907) cpp/src/mobile.cpp,
+// Copyright (C) 2026 Mark Higgins; this file is under the Mozilla Public
+// License 2.0 (https://mozilla.org/MPL/2.0/).
 //
 // sage_bench.cpp -- Open Sage (bgsage v2.0.20260907) fixed-pool loops: its
 // decision functions called directly, each item timed with CLOCK_MONOTONIC.
@@ -19,6 +21,13 @@
 //   cubeless checker possible_boards + MultiPlyStrategy::best_move_index,
 //                    filter 5 / 0.08 (bgbot_cpp.create_multipy), with the
 //                    bearoff database the analyzer attaches
+//   cubeful checker, pruned (1-ply only): possible_boards +
+//                    MultiPlyStrategy::best_move_index_cubeful, the chooser
+//                    Open Sage's rollouts use: 0-ply cubeful screen 5 / 0.08,
+//                    then 1-ply cubeful rescore of the survivors (library
+//                    default filter); cube_x as its rollouts set it; caches
+//                    cleared once per call (untimed), then kept across items,
+//                    as within one of its rollouts
 
 #include "bgbot/bearoff.h"
 #include "bgbot/board.h"
@@ -53,6 +62,7 @@ struct SageBench {
     BearoffDB db;
     std::shared_ptr<Strategy> strategy;       // the C API's engine
     std::shared_ptr<MultiPlyStrategy> cl[2];  // cubeless 0-ply, 1-ply
+    std::shared_ptr<MultiPlyStrategy> cf1;    // pruned cubeful 1-ply
     std::vector<Board> cands;
     const MoveFilter filter{5, 0.08f};
 
@@ -118,15 +128,19 @@ SageBench* sb_create(const char* type, const char* const* paths, const int* hidd
             e->cl[k]->set_move_prefilter(pubeval);
             e->cl[k]->set_bearoff_db(&e->db);  // as BgBotAnalyzer does
         }
+        e->cf1 = std::make_shared<MultiPlyStrategy>(e->strategy, 2, e->filter, false, false, 0);
+        e->cf1->set_move_prefilter(pubeval);
+        e->cf1->set_bearoff_db(&e->db);
         return e.release();
     } catch (const std::exception& ex) { last_error = ex.what(); return nullptr; }
 }
 
 void sb_destroy(SageBench* e) { delete e; }
 
-// One loop for the three item kinds. kind 0 cubeful checker, 1 cube, 2
-// cubeless checker. boards n x 26 (mover's frame), dice n x 2 (checker),
-// cube value / owner (0 centred, 1 mover, 2 opponent) n each (cubeful).
+// One loop for the item kinds. kind 0 cubeful checker, 1 cube, 2
+// cubeless checker, 3 cubeful checker pruned (plies 1 only). boards n x 26
+// (mover's frame), dice n x 2 (checker), cube value / owner (0 centred,
+// 1 mover, 2 opponent) n each (cubeful).
 // out_seconds n; out n x 26 chosen boards, or n cube decisions
 // (1 double | 2 take).
 int sb_bench(SageBench* e, int kind, int n, const int* boards, const int* dice,
@@ -140,13 +154,24 @@ int sb_bench(SageBench* e, int kind, int n, const int* boards, const int* dice,
             if (kind != 2)  // bgsage_mobile_analyze's money CubeInfo, Jacoby on
                 ci = CubeInfo{cube_value[i], static_cast<CubeOwner>(cube_owner[i]),
                               {0, 0, false}, -1.0f, true, false};
-            if (kind == 0 && plies == 1) e->cl[1]->clear_cache();  // untimed
+            if (kind == 3 && plies != 1) throw std::invalid_argument("kind 3 is 1-ply only");
+            if (kind == 0 && plies == 1) {  // untimed
+                e->cl[1]->clear_cache();
+                e->cf1->clear_cache();
+            }
+            if (kind == 3 && i == 0) e->cf1->clear_cache();  // once per call, untimed
             const double t0 = now_s();
             int k = 0;
             CubeDecision cd{};
             if (kind == 0) k = e->checker_cubeful(b, dice[2 * i], dice[2 * i + 1], ci, plies);
             else if (kind == 1) cd = e->cube(b, ci, plies);
-            else {
+            else if (kind == 3) {
+                possible_boards(b, dice[2 * i], dice[2 * i + 1], e->cands);
+                std::array<float, NUM_OUTPUTS> none{};
+                auto [pp, op] = pip_counts(b);
+                k = e->cf1->best_move_index_cubeful(
+                    e->cands, b, ci, cube_efficiency(none, is_race(b), pp, op));
+            } else {
                 possible_boards(b, dice[2 * i], dice[2 * i + 1], e->cands);
                 k = e->cl[plies]->best_move_index(e->cands, b);
             }

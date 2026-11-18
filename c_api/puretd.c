@@ -1,10 +1,10 @@
 /*
  * puretd.c -- PureTD C API core: everything except the net forward.
  *
- * Ports of the Python agents (td_agent.TDAgent, prob_agent.ProbAgent)
- * and of the self-play loops (gnubg_eval.play_and_record_cubeful,
- * play_models.play_game cubeless). The Python functions are the reference;
- * see puretd.h for the public contract.
+ * C versions of the Python agents (td_agent.TDAgent, prob_agent.ProbAgent)
+ * and of the self-play loops (third_party_opponents/gnubg/gnubg_eval.py
+ * play_and_record_cubeful, play_models.play_game cubeless). The Python
+ * functions are the reference; see puretd.h for the public contract.
  *
  * Numerics: leaf values are fp32 net outputs; 21-dice sums, cube
  * equities and comparisons are in double, in Python's order, with no
@@ -95,14 +95,6 @@ struct bgc_engine {
     uint32_t dd_cur;
     int dd_count;
     struct bgc_jan *jan;  /* PROB5JAN: puretd_janowski.c's state */
-    /* CUBEFUL with a bearoff table (bgc_set_bearoff): BearoffTDAgent's
-       routing (route_rows, select0, select1, the cube calls); NULL: none */
-    struct bgc_boroute *bo;
-    int bo_hazard;      /* bgc_set_bearoff_hazard; 1 at open */
-    unsigned char *rex; /* per batch row: an exact (table) leaf, cap_rex rows */
-    double *rexv;       /* its race_equity per leaf-player cube perspective, 3 a row */
-    int cap_rex;
-    unsigned char *cgrp; /* select1 under routing: 0 table-side candidate, 1 net-only; MAX_PLAYS */
 };
 
 #define DD_SLOTS 4096                /* dedup table; at most DD_SLOTS / 2 rows per expansion */
@@ -277,35 +269,6 @@ static void set_cube_cols(bgc_engine *e, int r0, int r1, int persp, int ica) {
     PROF_T0(t0);
     for (int r = r0; r < r1; r++) cube_cols(e->x + (size_t)r * e->ldx + e->nb, persp, ica);
     PROF_ADD(t0, BGC_PT_CUBECOLS, r1 - r0);
-}
-
-/* rex / rexv for every batch row. */
-static int ensure_rex(bgc_engine *e) {
-    if (e->cap_rex >= e->cap_rows) return 0;
-    unsigned char *f = realloc(e->rex, (size_t)e->cap_rows);
-    if (!f) return -1;
-    e->rex = f;
-    double *v = realloc(e->rexv, (size_t)e->cap_rows * 3 * sizeof(double));
-    if (!v) return -1;
-    e->rexv = v;
-    e->cap_rex = e->cap_rows;
-    return 0;
-}
-
-/* BearoffTDAgent's leaves for batch rows [r0, r1) (their base rows
- * encoded): with `on`, rex[r] = 1 and rexv[3r + c] = race_equity(row r's
- * position, c, with_own_fold=True) where a table tier applies; rex[r] = 0
- * otherwise. dice_mins reads them in place of the net's value. 0, -1 on
- * allocation failure. */
-static int route_rows(bgc_engine *e, int r0, int r1, int on) {
-    if (ensure_rex(e)) return -1;
-    for (int r = r0; r < r1; r++) {
-        int k = on ? bgc_i_bo_folded_row(e->bo, e->x + (size_t)r * e->ldx,
-                                         e->rexv + 3 * (size_t)r) : 0;
-        if (k < 0) return -1;
-        e->rex[r] = (unsigned char)k;
-    }
-    return 0;
 }
 
 #ifdef BGC_BF16
@@ -606,14 +569,12 @@ static bgc_engine *open_engine(const char *path, char *err, size_t errlen, int j
 #endif
     e->dd_row = malloc(DD_SLOTS * sizeof(int));
     e->dd_gen = calloc(DD_SLOTS, sizeof(uint32_t));
-    e->cgrp = malloc(MAX_PLAYS);
-    e->bo_hazard = 1;
     if (kind == BGC_KIND_PROB5JAN && !(e->jan = bgc_i_jan_new())) {
         set_err(err, errlen, "bgc_open: out of memory");
         bgc_close(e);
         return NULL;
     }
-    if (!e->xpar || !e->dd_row || !e->dd_gen || !e->cgrp || !e->ckeep || !e->pidx || !e->pkey || !e->plays || !e->iplays || !e->slot_cand || !e->cscore || !e->cdoff || !e->cpass
+    if (!e->xpar || !e->dd_row || !e->dd_gen || !e->ckeep || !e->pidx || !e->pkey || !e->plays || !e->iplays || !e->slot_cand || !e->cscore || !e->cdoff || !e->cpass
         || ensure_rows(e, 4096) || ensure_rep(e, 8192)) {
         set_err(err, errlen, "bgc_open: out of memory");
         bgc_close(e);
@@ -632,8 +593,6 @@ void bgc_close(bgc_engine *e) {
     free(e->ckeep);
     free(e->pidx); free(e->pkey);
     free(e->rkey); free(e->dd_row); free(e->dd_gen); free(e->xpar);
-    free(e->cgrp); free(e->rex); free(e->rexv);
-    bgc_i_bo_free(e->bo);
     bgc_i_jan_free(e->jan);
     free(e);
 }
@@ -748,19 +707,16 @@ static int dice_index(int a, int b) {
 /* Per dice: min over the replies of the value from the view of the
  * player on roll after the reply (rows at row_off + row). Terminal
  * reply (the player at X just won): 0.0 if zero_term, else -gr when
- * gc, else -1. ex >= 0: rows route_rows marked exact take their table
- * value at that cube perspective of the player on roll (rex indexed by
- * row, without row_off). */
+ * gc, else -1. */
 static void dice_mins(const bgc_engine *e, int slot, int row_off, int zero_term,
-                      int gc, int ex, double mins[21]) {
+                      int gc, double mins[21]) {
     const int *doff = e->cdoff + (size_t)slot * 22;
     for (int k = 0; k < 21; k++) {
         double m = INFINITY;
         for (int r = doff[k]; r < doff[k + 1]; r++) {
             double val;
             const int row = e->rep_row[r];
-            if (row >= 0) val = ex >= 0 && e->rex[row] ? e->rexv[3 * (size_t)row + ex]
-                                                       : (double)e->v[row_off + row];
+            if (row >= 0) val = (double)e->v[row_off + row];
             else if (zero_term) val = 0.0;
             else val = -(double)(gc ? e->rep_gr[r] : 1);
             if (val < m) m = val;
@@ -797,9 +753,8 @@ static double dice_sum(const double mins[21], const unsigned char *pass, int gro
 
 /* ── 1-ply value ───────────────────────────────────────────────── */
 
-/* TDAgent.value_oneply_checker[_cubeful] / ProbAgent.value_oneply_checker
- * (BearoffTDAgent's with a table attached: bearoff-class leaves at their
- * folded table value). *err set on allocation failure. keep: as expand21
+/* TDAgent.value_oneply_checker[_cubeful] / ProbAgent.value_oneply_checker.
+ * *err set on allocation failure. keep: as expand21
  * (slot 0); the batch (rows, values, reply records of slot 0) stays valid
  * until the next forward. */
 static double value1k(bgc_engine *e, const BoardState *X, const bgc_cube *cube, int keep,
@@ -813,8 +768,6 @@ static double value1k(bgc_engine *e, const BoardState *X, const bgc_cube *cube, 
     if (e->kind == BGC_KIND_CUBEFUL && !cube) return NAN;
     int nrow = 0, nrep = 0;
     if (expand21(e, X, 0, keep, &nrow, &nrep)) { *err = 1; return NAN; }
-    const int route = e->bo && bgc_i_bo_may_reach(X, 1);
-    if (route && route_rows(e, 0, nrow, 1)) { *err = 1; return NAN; }
     int q = 1 - X->turn;
     int gc = 1, persp = 0, ica = 0;
     if (e->kind == BGC_KIND_CUBEFUL) {
@@ -826,7 +779,7 @@ static double value1k(bgc_engine *e, const BoardState *X, const bgc_cube *cube, 
     forward_v1(e, 0, nrow, X, persp, ica);
     PROF_T0(t0);
     double mins[21];
-    dice_mins(e, 0, 0, e->kind == BGC_KIND_PROB, gc, route ? persp : -1, mins);
+    dice_mins(e, 0, 0, e->kind == BGC_KIND_PROB, gc, mins);
     double r = dice_sum(mins, e->cpass, e->kind == BGC_KIND_PROB5,
                         e->kind == BGC_KIND_PROB ? FLIP_ONE_MINUS : FLIP_NEG);
     PROF_ADD(t0, BGC_PT_REDUCE, nrow);
@@ -851,8 +804,6 @@ static int value1_pair(bgc_engine *e, const BoardState *X, const bgc_cube *a,
     }
     int nrow = 0, nrep = 0;
     if (expand21(e, X, 0, -1, &nrow, &nrep)) return -1;
-    const int route = e->bo && bgc_i_bo_may_reach(X, 1);
-    if (route && route_rows(e, 0, nrow, 1)) return -1;
     int q = 1 - X->turn;
     const bgc_cube *cubes[2] = {a, b};
     double *outs[2] = {va, vb};
@@ -863,7 +814,7 @@ static int value1_pair(bgc_engine *e, const BoardState *X, const bgc_cube *a,
         forward_v1(e, 0, nrow, X, persp, ica);
         PROF_T0(t0);
         double mins[21];
-        dice_mins(e, 0, 0, 0, gammons_count(cubes[c]), route ? persp : -1, mins);
+        dice_mins(e, 0, 0, 0, gammons_count(cubes[c]), mins);
         *outs[c] = dice_sum(mins, e->cpass, 0, FLIP_NEG);
         PROF_ADD(t0, BGC_PT_REDUCE, nrow);
     }
@@ -897,9 +848,7 @@ int bgc_dice_values(bgc_engine *e, const BoardState *s, const bgc_cube *cube,
     /* The realized and the counterfactual rolls are read from this one
        expansion, forced passes included. Actor scores or a separately
        forwarded realized successor would break the centering. */
-    const int route = e->bo && bgc_i_bo_may_reach(s, 1);
-    dice_mins(e, 0, 0, 0, cubeful ? gammons_count(cube) : 1,
-              route ? cube_persp(cube->owner, 1 - s->turn) : -1, values);
+    dice_mins(e, 0, 0, 0, cubeful ? gammons_count(cube) : 1, values);
     for (int k = 0; k < 21; k++) {
         values[k] = -values[k];
         if (!isfinite(values[k])) return -1;
@@ -956,9 +905,7 @@ static int vec1_prob5(const bgc_engine *e, float out[5]) {
 
 /* 0-ply over the n candidates in e->plays. Fills cscore (mover view),
  * returns the argmin of the opponent-view values (-2 on allocation
- * failure). With a table attached and a cube (BearoffTDAgent), bearoff-
- * class candidates take race_equity(c, opp persp, with_own_fold=True),
- * compared in double with the net's values. */
+ * failure). */
 static int select0(bgc_engine *e, const BoardState *s, int n, const bgc_cube *cube) {
     int opp = 1 - s->turn;
     PROF_T0(t0);
@@ -971,7 +918,6 @@ static int select0(bgc_engine *e, const BoardState *s, int n, const bgc_cube *cu
     }
     forward_succ(e, 0, n, s, persp, ica);
     PROF_T0(t1);
-    const int route = e->bo && cube && bgc_i_bo_may_reach(s, 1);
     int best = 0;
     double best_v = 0.0;
     for (int i = 0; i < n; i++) {
@@ -982,11 +928,6 @@ static int select0(bgc_engine *e, const BoardState *s, int n, const bgc_cube *cu
             if (e->kind == BGC_KIND_PROB) v = 0.0;
             else if (e->kind == BGC_KIND_CUBEFUL && cube && !gammons_count(cube)) v = -1.0;
             else v = -(double)gr;
-        } else if (route) {
-            double ev[3];
-            const int k = bgc_i_bo_folded(e->bo, rs, ev);
-            if (k < 0) return -2;
-            if (k) v = ev[persp];
         }
         e->cscore[i] = e->kind == BGC_KIND_PROB ? 1.0 - v : -v;
         if (i == 0 || v < best_v) { best = i; best_v = v; }
@@ -997,16 +938,14 @@ static int select0(bgc_engine *e, const BoardState *s, int n, const bgc_cube *cu
 
 /* Scores the batch slots [0, nslot) after their rows [0, nrow) are
  * expanded: cubeless kinds (TDAgent._choose_checker_oneply_cubeless,
- * ProbAgent._choose_1ply) or cubeful (TDAgent._choose_checker_oneply_cubeful;
- * `routed`: the rows' rex marks, BearoffTDAgent._candidate_value_oneply). */
-static int flush1(bgc_engine *e, int nslot, int nrow, const bgc_cube *cube, int mover,
-                  int routed) {
+ * ProbAgent._choose_1ply) or cubeful (TDAgent._choose_checker_oneply_cubeful). */
+static int flush1(bgc_engine *e, int nslot, int nrow, const bgc_cube *cube, int mover) {
     if (nslot == 0) return 0;
     double mins[21];
     if (e->kind != BGC_KIND_CUBEFUL) {
         forward(e, 0, nrow);
         for (int s = 0; s < nslot; s++) {
-            dice_mins(e, s, 0, e->kind == BGC_KIND_PROB, 1, -1, mins);
+            dice_mins(e, s, 0, e->kind == BGC_KIND_PROB, 1, mins);
             e->cscore[e->slot_cand[s]] = dice_sum(mins, e->cpass + (size_t)s * 21,
                                                   e->kind == BGC_KIND_PROB5, FLIP_NONE);
         }
@@ -1023,13 +962,12 @@ static int flush1(bgc_engine *e, int nslot, int nrow, const bgc_cube *cube, int 
         set_cube_cols(e, nrow, 2 * nrow, PERSP_MINE, 1);
     }
     forward(e, 0, opp_can ? 2 * nrow : nrow);
-    const int ex_a = routed ? cube_persp(cube->owner, mover) : -1;
     for (int s = 0; s < nslot; s++) {
-        dice_mins(e, s, 0, 0, gc_a, ex_a, mins);
+        dice_mins(e, s, 0, 0, gc_a, mins);
         double u_a = dice_sum(mins, NULL, 0, FLIP_NONE);
         double val = u_a;
         if (opp_can) {
-            dice_mins(e, s, nrow, 0, 1, routed ? PERSP_MINE : -1, mins);
+            dice_mins(e, s, nrow, 0, 1, mins);
             double u_b = dice_sum(mins, NULL, 0, FLIP_NONE);
             double v_dt_opp = -2.0 * u_b;
             if (money_decision(-u_a, v_dt_opp, opp_persp, cube->jacoby))
@@ -1041,20 +979,12 @@ static int flush1(bgc_engine *e, int nslot, int nrow, const bgc_cube *cube, int 
 }
 
 /* 1-ply over the n candidates in e->plays of root s (only those with
- * keep[i] when keep is non-NULL; the others score NAN); argmax of cscore.
- * With a table attached and s within two moves of the bearoff class
- * (BearoffTDAgent.choose_checker_action_cubeful): a bearoff-class
- * candidate keeps its 0-ply table value unexpanded, one within a move of
- * the class expands with its leaves routed, and these rank first: a
- * net-only candidate is chosen only when strictly better. */
+ * keep[i] when keep is non-NULL; the others score NAN); argmax of cscore. */
 static int select1(bgc_engine *e, const BoardState *s, int n, const unsigned char *keep,
                    const bgc_cube *cube, int mover) {
     int gc = (e->kind == BGC_KIND_CUBEFUL) ? gammons_count(cube) : 1;
-    const int route = e->bo && bgc_i_bo_may_reach(s, 2);
-    const int opp_persp = route ? cube_persp(cube->owner, 1 - mover) : 0;
     int nslot = 0, nrow = 0, nrep = 0;
     for (int i = 0; i < n; i++) {
-        e->cgrp[i] = 0;
         if (keep && !keep[i]) {
             e->cscore[i] = NAN;
             continue;
@@ -1065,38 +995,22 @@ static int select1(bgc_engine *e, const BoardState *s, int n, const unsigned cha
             e->cscore[i] = (e->kind == BGC_KIND_PROB || !gc) ? 1.0 : (double)gr;
             continue;
         }
-        int leaves = 0;
-        if (route) {
-            double ev[3];
-            const int k = bgc_i_bo_folded(e->bo, rs, ev);
-            if (k < 0) return -2;
-            if (k) {
-                e->cscore[i] = -ev[opp_persp];
-                continue;
-            }
-            leaves = bgc_i_bo_may_reach(rs, 1);
-            e->cgrp[i] = !leaves;
-        }
         e->slot_cand[nslot] = i;
-        const int r0 = nrow;
         if (expand21(e, rs, nslot, -1, &nrow, &nrep)) return -2;
-        if (route && route_rows(e, r0, nrow, leaves)) return -2;
         nslot++;
         if (nrow >= BGC_CHUNK) {
-            if (flush1(e, nslot, nrow, cube, mover, route)) return -2;
+            if (flush1(e, nslot, nrow, cube, mover)) return -2;
             nslot = nrow = nrep = 0;
         }
     }
-    if (flush1(e, nslot, nrow, cube, mover, route)) return -2;
+    if (flush1(e, nslot, nrow, cube, mover)) return -2;
     int best = -1;
     double best_v = -INFINITY;
-    for (int g = 0; g < (route ? 2 : 1); g++)
-        for (int i = 0; i < n; i++)
-            if ((!keep || keep[i]) && (!route || e->cgrp[i] == g)
-                && (best < 0 || e->cscore[i] > best_v)) {
-                best_v = e->cscore[i];
-                best = i;
-            }
+    for (int i = 0; i < n; i++)
+        if ((!keep || keep[i]) && (best < 0 || e->cscore[i] > best_v)) {
+            best_v = e->cscore[i];
+            best = i;
+        }
     return best;
 }
 
@@ -1119,25 +1033,6 @@ static int select1_root(bgc_engine *e, const BoardState *s, int n, const bgc_cub
         return only;
     }
     return select1(e, s, n, e->ckeep, cube, mover);
-}
-
-/* bgc_set_bearoff for CUBEFUL (puretd_janowski.c dispatches here): the
-   routing reads perspective196 rows (bgc_i_bo_folded_row). */
-int bgc_i_cubeful_set_bearoff(bgc_engine *e, const bgc_bearoff *t) {
-    if (strcmp(e->enc.base->name, "perspective196")) return -1;
-    bgc_i_bo_free(e->bo);
-    e->bo = NULL;
-    if (t && !(e->bo = bgc_i_bo_new(t, e->bo_hazard))) return -1;
-    return 0;
-}
-
-int bgc_i_cubeful_bearoff(const bgc_engine *e) { return e->bo != NULL; }
-
-int bgc_set_bearoff_hazard(bgc_engine *e, int on) {
-    if (!e || e->kind != BGC_KIND_CUBEFUL) return -1;
-    e->bo_hazard = on != 0;
-    if (e->bo) bgc_i_bo_set_hazard(e->bo, e->bo_hazard);
-    return 0;
 }
 
 int bgc_set_search(bgc_engine *e, const bgc_search *o) {
@@ -1239,8 +1134,7 @@ static int play_from_replies(bgc_engine *e, const BoardState *X, int d1, int d2,
 
 /* value1 of X and the 0-ply play for (d1, d2): bgc_value_1ply and
  * bgc_best_move(plies 0) from one expansion and one forward on a
- * row-exact backend, the two calls otherwise (and with a bearoff table
- * attached). *v1 = value1's double;
+ * row-exact backend, the two calls otherwise. *v1 = value1's double;
  * vec5 (nullable, PROB5 only): vec1_prob5's target vector from the same
  * forward. Returns choose()'s index (candidates and scores in e->plays /
  * e->cscore), -1 forced pass, -2 error. */
@@ -1250,7 +1144,7 @@ static int value1_play(bgc_engine *e, const BoardState *X, const bgc_cube *cube,
     if (vec5 && (e->kind != BGC_KIND_PROB5 || board_is_game_over(X))) return -2;
     const int fast = e->row_exact && !e->bf16 && d1 >= 1 && d1 <= 6 && d2 >= 1 && d2 <= 6
                      && !board_is_game_over(X) && (e->kind != BGC_KIND_CUBEFUL || cube)
-                     && e->kind != BGC_KIND_PROB5JAN && !e->bo;
+                     && e->kind != BGC_KIND_PROB5JAN;
     {
         PROF_ENTER(BGC_PC_V1);
         *v1 = value1k(e, X, cube, fast ? dice_index(d1, d2) : -1, &err);
@@ -1385,12 +1279,7 @@ int bgc_offer_double(bgc_engine *e, const BoardState *s, const bgc_cube *cube, i
     int persp_nd = cube_persp(cube->owner, s->turn);
     if (persp_nd == PERSP_THEIRS) return 0;
     double v_nd, v_dt;
-    /* BearoffTDAgent: a bearoff-class root takes the table's values. */
-    const int exact = e->bo ? bgc_i_bo_cube(e->bo, s, persp_nd, &v_nd, &v_dt) : 0;
-    if (exact < 0) return -1;
-    if (exact) {
-        /* (v_nd, v_dt) set */
-    } else if (plies == 0) {
+    if (plies == 0) {
         PROF_T0(t0);
         encode_base(e, 0, s);
         encode_base(e, 1, s);
@@ -1416,12 +1305,6 @@ int bgc_respond_to_double(bgc_engine *e, const BoardState *s, const bgc_cube *cu
     if (e->kind != BGC_KIND_CUBEFUL) return 1;
     if (!cube || (plies != 0 && plies != 1)) return -1;
     double v_dt;
-    if (e->bo) {        /* BearoffTDAgent: the table's take, the hint unread */
-        double nd;
-        const int k = bgc_i_bo_cube(e->bo, s, cube_persp(cube->owner, s->turn), &nd, &v_dt);
-        if (k < 0) return -1;
-        if (k) return v_dt <= 1.0;
-    }
     if (hint && hint->plies == plies && !isnan(hint->v_double_take)) {
         /* The offer compared in double. Its float diagnostic value can
          * round a pass just above 1 down to 1; preserve the decision. */
@@ -1435,6 +1318,43 @@ int bgc_respond_to_double(bgc_engine *e, const BoardState *s, const bgc_cube *cu
 }
 
 /* ── RNG (CPython random: MT19937, init_by_array seeding) ──────── */
+
+/* mt_init_genrand, bgc_rng_seed (init_by_array) and bgc_rng_u32
+   (genrand_int32) follow mt19937ar.c; bgc_rng_getrandbits and
+   bgc_rng_randint follow CPython's random (getrandbits, _randbelow).
+
+   A C-program for MT19937, with initialization improved 2002/1/26.
+   Coded by Takuji Nishimura and Makoto Matsumoto.
+
+   Copyright (C) 1997 - 2002, Makoto Matsumoto and Takuji Nishimura,
+   All rights reserved.
+
+   Redistribution and use in source and binary forms, with or without
+   modification, are permitted provided that the following conditions
+   are met:
+
+     1. Redistributions of source code must retain the above copyright
+        notice, this list of conditions and the following disclaimer.
+
+     2. Redistributions in binary form must reproduce the above copyright
+        notice, this list of conditions and the following disclaimer in the
+        documentation and/or other materials provided with the distribution.
+
+     3. The names of its contributors may not be used to endorse or promote
+        products derived from this software without specific prior written
+        permission.
+
+   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+   A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+   CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
 
 #define MT_N 624
 #define MT_M 397
@@ -1632,7 +1552,8 @@ int bgc_play_game_vr(bgc_engine *white, bgc_engine *black, const bgc_game_opts *
     if (!o || !white || !black || !reference || every < 1 || !luck_white || !n_corrected)
         return -1;
     if (o->cubeful) {
-        if (white->kind != BGC_KIND_CUBEFUL || black->kind != BGC_KIND_CUBEFUL
+        if ((white->kind != BGC_KIND_CUBEFUL && white->kind != BGC_KIND_PROB5JAN)
+            || (black->kind != BGC_KIND_CUBEFUL && black->kind != BGC_KIND_PROB5JAN)
             || reference->kind != BGC_KIND_CUBEFUL) return -1;
     } else if (!cubeless_money_kind(white) || !cubeless_money_kind(black)
                 || !cubeless_money_kind(reference)) return -1;
@@ -1687,8 +1608,8 @@ int bgc_bench_selfplay(bgc_engine *e, const bgc_game_opts *o, unsigned long long
         double t0 = now_s();
         if (bgc_play_game(e, e, o, &rng, &r, NULL, NULL)) return -1;
         double dt = now_s() - t0;
-        /* Forced passes are not decisions (gnubg's count): n_checker less
-           the cubeful loop's passes. */
+        /* Forced passes are not decisions: n_checker less the cubeful
+           loop's passes. */
         int nck = r.n_checker - (o->cubeful ? r.n_dance : 0);
         int dec = nck;
         if (o->cubeful && o->cube_enabled) dec += r.n_cube_offer + r.n_cube_resp;

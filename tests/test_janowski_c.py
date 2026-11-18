@@ -1,25 +1,19 @@
 """Prob5Jan in C (experiments/c_collect/SPEC_p5jan_money_c.md) against the
-Python reference (janowski.py, janowski_agent.py, bearoff.py).
+Python reference (janowski.py, janowski_agent.py).
 
   - conversion alone (JanowskiC): ~1000 nested prob5 vectors (uniform,
     net-like clamped sigmoids, the 0 / 1 / 1e-7 / 0.5 edges) x 3
     perspectives x jacoby x x in {0.76, 0, 1, 0.5}: janowski_equity,
     janowski_equity_folded, cubeless_equity, fold_cube_decision bitwise;
     money_cube_action verdicts equal
-  - bearoff alone: ~400 bearoff-class boards (two-sided tier, hazard tier,
-    gammonish, edges, parked opponents, both turns) and non-class boards:
-    exact_probs5, race_equity (fold x 3 perspectives), race_cube_values,
-    ts_win_prob within 1e-12 (expected 0), not-applicable exactly where
-    Python returns None
-  - full stack vs JanowskiAgent (torch): pool and bearoff-class points,
+  - full stack vs JanowskiAgent (torch): pool and bearoff points,
     0-ply and 1-ply: every candidate's mover-view score, (v_nd, v_dt),
     bgc_value, bgc_value_1ply, bgc_value_prob5 within 1e-5 (largest
     |C - Python| over all of these on the full pool: simd 4.2e-6, torch
     3.5e-6); checker choice, offer, take and
     respond equal, or a near-tie (both choices' Python scores, or a cube
-    value and its threshold, within 1e-5). bearoff=False matches
-    bearoff_exact=False. NULL cube / wrong kind return the error
-    values; bgc_collect refuses.
+    value and its threshold, within 1e-5). NULL cube / wrong kind
+    return the error values; bgc_collect refuses.
   - CAgent in play_models.play_game against JanowskiAgent, every decision
     shadowed by the other side: identical up to a near-tie; C vs C
     (bgc_play_game) ends as the mixed game when no near-tie occurred.
@@ -42,7 +36,6 @@ import numpy as np
 import pytest
 import torch
 
-import bearoff
 import janowski as J
 from backgammon_engine import BoardState, WHITE, BLACK
 from encoding import CubePerspective
@@ -56,10 +49,6 @@ PROB5 = os.path.join(REPO, "best_models", "cubeless_prob5_512_512_256_256.pt")
 CUBEFUL = os.path.join(REPO, "best_models", "cubeful_money_512_512_256_256.pt")
 POOL = os.path.join(REPO, "experiments", "benchmarks", "fixedpool_cubeful_positions.json")
 
-pytestmark = pytest.mark.skipif(
-    not (os.path.exists(bearoff.DEFAULT_TABLE) and os.path.exists(bearoff.DEFAULT_TS_TABLE)),
-    reason="bearoff tables not built")
-
 ALL_BACKENDS = ("ref", "simd", "torch")
 _env_b = os.environ.get("CJAN_BACKENDS", "").strip()
 _default_b = ALL_BACKENDS if os.environ.get("BG_TESTS_SLOW") == "1" else ("simd",)
@@ -69,7 +58,6 @@ FULL = os.environ.get("CJAN_FULL") == "1"
 N0 = int(os.environ.get("CJAN_N0", "0")) or (1000 if FULL else 150)
 N1 = int(os.environ.get("CJAN_N1", "0")) or (300 if FULL else 40)
 N_BO = 60
-BO_TOL = 1e-12
 
 CENT, MINE, THEIRS = CubePerspective.CENTERED, CubePerspective.MINE, CubePerspective.THEIRS
 PERSPS = (CENT, MINE, THEIRS)
@@ -118,8 +106,8 @@ def JC(backend):
 
 
 @functools.lru_cache(maxsize=None)
-def jan_engine(backend, bo=True):
-    return _P().Engine(PROB5, backend, janowski=True, bearoff=bo)
+def jan_engine(backend):
+    return _P().Engine(PROB5, backend, janowski=True)
 
 
 @functools.lru_cache(maxsize=None)
@@ -128,16 +116,15 @@ def _net():
 
 
 @functools.lru_cache(maxsize=None)
-def agent(plies, bo=True):
-    return JanowskiAgent(_net(), oneply=bool(plies), bearoff_exact=bo)
+def agent(plies):
+    return JanowskiAgent(_net(), oneply=bool(plies))
 
 
 # ── positions ───────────────────────────────────────────────────────
 
 def bo_state(cme, copp, turn=WHITE, outside=None, bar=None):
     """On-roll side's home counts `cme` (points 1..6), opponent's `copp`;
-    `outside`: {(player, point 7..18): n} extra checkers (as
-    tests/test_bearoff_routing.py)."""
+    `outside`: {(player, point 7..18): n} extra checkers."""
     pts = [0] * 24
     W, B = (cme, copp) if turn == WHITE else (copp, cme)
     for i, v in enumerate(W):
@@ -166,51 +153,6 @@ def rand_home(rng, n):
     return tuple(c)
 
 
-def bearoff_boards(n, seed):
-    """[(category, state)]: bearoff-class boards of every routing tier and
-    edge, then non-class ones (outside checker, bar)."""
-    rng = random.Random(seed)
-    out = []
-    cats = ("ts", "hazard", "gammonish", "parked", "edge")
-    for k in range(n):
-        cat = cats[k % len(cats)]
-        turn = rng.randrange(2)
-        if cat == "ts":
-            a, b = rng.randint(1, 8), rng.randint(1, 8)
-        elif cat == "hazard":
-            a, b = rng.randint(9, 14), rng.randint(1, 14)
-            if rng.random() < 0.5:
-                a, b = b, a
-        elif cat == "gammonish":
-            a, b = 15, rng.randint(1, 15)
-            if rng.random() < 0.5:
-                a, b = b, a
-        elif cat == "parked":
-            a, b = rng.randint(1, 15), rng.randint(1, 15)
-            out.append((cat, bo_state(rand_home(rng, a), (b, 0, 0, 0, 0, 0), turn)))
-            continue
-        else:
-            a, b = rng.choice([(1, rng.randint(1, 15)), (rng.randint(1, 15), 1),
-                               (15, 15), (1, 1), (15, rng.randint(1, 8)),
-                               (rng.randint(9, 14), 15)])
-            if rng.random() < 0.3:
-                out.append((cat, bo_state((0, 0, 0, 0, 0, a), rand_home(rng, b), turn)))
-                continue
-        out.append((cat, bo_state(rand_home(rng, a), rand_home(rng, b), turn)))
-    for k in range(max(10, n // 10)):
-        turn = rng.randrange(2)
-        a, b = rng.randint(1, 13), rng.randint(1, 13)
-        if k % 2:
-            s = bo_state(rand_home(rng, a), rand_home(rng, b), turn,
-                         outside={(rng.randrange(2), rng.randint(7, 18)): 1})
-        else:
-            bar = [0, 0]
-            bar[rng.randrange(2)] = 1
-            s = bo_state(rand_home(rng, a), rand_home(rng, b), turn, bar=bar)
-        out.append(("nonclass", s))
-    return out
-
-
 def rand_ms(rng, jacoby=None):
     return MatchState(cube_owner=CubeOwner(rng.randrange(3)),
                       cube_value=1 << rng.randrange(3),
@@ -218,18 +160,19 @@ def rand_ms(rng, jacoby=None):
 
 
 def bearoff_points(n, seed):
-    """Constructed checker and cube points around the bearoff tables:
-    ([(state, dice, ms)], [(state, ms)]): two-sided tier, hazard tier,
-    gammonish, one checker short of the class (successors in class)."""
+    """Constructed bearoff checker and cube points ([(state, dice, ms)],
+    [(state, ms)]), four kinds in turn: both sides at most 8 checkers; up
+    to 14; one side with all 15 (gammons possible); one checker outside
+    home."""
     rng = random.Random(seed)
     ck, cu = [], []
-    cats = ("ts", "hazard", "gammonish", "near")
+    cats = ("small", "large", "gammonish", "outside")
     for k in range(n):
         cat = cats[k % len(cats)]
         turn = rng.randrange(2)
-        if cat == "ts":
+        if cat == "small":
             s = bo_state(rand_home(rng, rng.randint(2, 8)), rand_home(rng, rng.randint(1, 8)), turn)
-        elif cat == "hazard":
+        elif cat == "large":
             a, b = rng.randint(9, 14), rng.randint(2, 14)
             if rng.random() < 0.5:
                 a, b = b, a
@@ -296,8 +239,8 @@ def _key(s):
 
 def py_checker(ag, state, dice, ms, plies):
     """choose_checker_action_cubeful's own pieces: (successors, mover-view
-    scores float64, chosen index, exact mask), or None on a pass. 1-ply:
-    _value_oneply(fold=True) on every non-exact candidate (n > 1)."""
+    scores float64, chosen index, terminal mask), or None on a pass. 1-ply:
+    _value_oneply(fold=True) on every non-terminal candidate (n > 1)."""
     feats, nxt = ag._get_legal_plays_encoded(state, dice)
     n = len(nxt)
     if n == 0:
@@ -639,67 +582,7 @@ def test_cube_action_and_fold(JC):
     assert n_dbl and n_take
 
 
-# ══ 2. the bearoff tables alone ═════════════════════════════════════
-
-def test_bearoff_bitwise(JC):
-    boards = bearoff_boards(400, 11)
-    # terminal boards: one side all off
-    rng = random.Random(12)
-    for _ in range(10):
-        boards.append(("terminal", bo_state((0,) * 6, rand_home(rng, rng.randint(1, 15)),
-                                            rng.randrange(2))))
-        boards.append(("terminal", bo_state(rand_home(rng, rng.randint(1, 15)), (0,) * 6,
-                                            rng.randrange(2))))
-    mx = {k: 0.0 for k in ("exact_probs5", "race_equity", "race_cube_values", "ts_win_prob")}
-    cnt = {k: 0 for k in mx}
-    tiers = {}
-    notes = []
-
-    def cmp(name, c, py, case):
-        if py is None or c is None:
-            assert (c is None) == (py is None), f"{name} None mismatch: {case} C {c!r} Py {py!r}"
-            return
-        d = float(np.max(np.abs(np.asarray(c, np.float64) - np.asarray(py, np.float64))))
-        assert d <= BO_TOL, f"{name}: {case} C {c!r} Py {py!r} (max diff {d:.3g})"
-        mx[name] = max(mx[name], d)
-        cnt[name] += 1
-
-    for cat, s in boards:
-        case = f"{cat} " + desc(s)
-        cls = bearoff.is_bearoff_class(s)
-        term = s.is_game_over()
-        tier = bearoff._exact_tier(s)
-        tiers[(cat, None if tier is None else tier[0])] = \
-            tiers.get((cat, None if tier is None else tier[0]), 0) + 1
-        ep_c = JC.exact_probs5(s)
-        if not cls:
-            assert ep_c is None, f"exact_probs5 on a non-class board: {case} C {ep_c!r}"
-        elif term:
-            notes.append(f"terminal exact_probs5 C {ep_c!r} Py {bearoff.exact_probs5(s)!r}")
-        else:
-            cmp("exact_probs5", ep_c, bearoff.exact_probs5(s), case)
-        for persp in PERSPS:
-            for fold in (False, True):
-                cmp("race_equity", JC.race_equity(s, persp, fold),
-                    bearoff.race_equity(s, persp, with_own_fold=fold),
-                    case + f" persp={int(persp)} fold={fold}")
-            cmp("race_cube_values", JC.race_cube_values(s, persp),
-                bearoff.race_cube_values(s, persp), case + f" persp={int(persp)}")
-        ts_c, ts_py = JC.ts_win_prob(s), bearoff.ts_win_prob(s)
-        if term and (ts_c is None) != (ts_py is None):
-            notes.append(f"terminal ts_win_prob C {ts_c!r} Py {ts_py!r}: {case}")
-        else:
-            cmp("ts_win_prob", ts_c, ts_py, case)
-    print(f"\n[cjan] bearoff: {len(boards)} boards; tiers {dict(sorted(tiers.items(), key=str))}")
-    for k in mx:
-        print(f"  {k}: {cnt[k]} values compared, max |C - Py| = {mx[k]:.3g}")
-    for n in notes[:6]:
-        print("  note: " + n)
-    assert all(cnt.values())
-    assert {t for (_, t) in tiers} >= {"ts", "hazard", None}
-
-
-# ══ 3. full stack vs JanowskiAgent ═════════════════════════════════
+# ══ 2. full stack vs JanowskiAgent ═════════════════════════════════
 
 @pytest.fixture(autouse=True)
 def _threads():
@@ -729,7 +612,7 @@ def test_fullstack_0ply_bearoff(backend):
     tol = tol_for(backend)
     ck, cu = bearoff_points(N_BO, 21)
     t = run_points(Tally(), e, ag, ck, cu, 0, tol, "bearoff ")
-    finish(t, f"[cjan] 0-ply bearoff-class, {backend}: {N_BO} + {N_BO} points, bound {tol:g}")
+    finish(t, f"[cjan] 0-ply bearoff, {backend}: {N_BO} + {N_BO} points, bound {tol:g}")
 
 
 def test_fullstack_1ply(backend):
@@ -747,25 +630,14 @@ def test_fullstack_1ply(backend):
         if ref is not None:
             assert ref[0][ref[2]] == out[0]
     finish(t, f"[cjan] 1-ply, {backend}: {N1} + {N1} pool points, "
-              f"{N1 // 2} + {N1 // 2} bearoff-class, bound {tol:g}")
-
-
-def test_bearoff_off_matches_agent_without_tables(backend):
-    """Engine(bearoff=False) is JanowskiAgent(bearoff_exact=False) on
-    bearoff-class points (net probabilities through the conversion)."""
-    e, ag = jan_engine(backend, False), agent(0, False)
-    tol = tol_for(backend)
-    ck, cu = bearoff_points(N_BO, 23)
-    t = run_points(Tally(), e, ag, ck, cu, 0, tol, "no-tables ")
-    finish(t, f"[cjan] bearoff=False vs bearoff_exact=False, {backend}: "
-              f"{N_BO} + {N_BO} points, bound {tol:g}")
+              f"{N1 // 2} + {N1 // 2} bearoff, bound {tol:g}")
 
 
 def test_error_values(backend):
     """NULL cube: bgc_value / bgc_value_1ply NaN, bgc_best_move and
     bgc_score_moves -2, bgc_offer_double / bgc_respond_to_double -1;
     bgc_collect -1; bgc_open_janowski refuses a non-prob5 export;
-    bgc_set_jan / bgc_set_bearoff refuse a non-PROB5JAN engine."""
+    bgc_set_jan refuses a non-PROB5JAN engine."""
     import ctypes
     P = _P()
     from bg_fast import _python_to_c, _CBoardState, MAX_PLAYS
@@ -795,14 +667,11 @@ def test_error_values(backend):
         with pytest.raises((RuntimeError, ValueError)):
             P.Engine(CUBEFUL, backend, janowski=True)
     plain = P.Engine(PROB5, backend)
-    for fn in ("bgc_set_jan", "bgc_set_bearoff"):
-        f = getattr(L, fn, None)
-        if f is not None and f.argtypes:        # raw ctypes needs the signature
-            assert f(plain.h, None) != 0, fn
+    assert L.bgc_set_jan(plain.h, None) != 0
     assert e.kind == getattr(P, "KIND_PROB5JAN", 6)
 
 
-# ══ 4. CAgent in the Python game loop ══════════════════════════════
+# ══ 3. CAgent in the Python game loop ══════════════════════════════
 
 class Shadow:
     """The acting side of a mixed game, every decision also asked of the

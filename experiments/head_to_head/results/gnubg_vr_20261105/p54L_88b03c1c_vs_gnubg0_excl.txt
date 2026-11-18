@@ -1,0 +1,4 @@
+p5_c6_gnubg0ply  4 npz, 400000 games, max cube 1
+  all            pairs 200000  luck-adj  +48.5 [+48.1, +48.8]  raw  +46.8 [+42.9, +50.7]  VF 117
+  excl cube>128  pairs 200000  luck-adj  +48.5 [+48.1, +48.8]  raw  +46.8 [+42.9, +50.7]  VF 117
+  excluded pairs: 0  (cubes [])

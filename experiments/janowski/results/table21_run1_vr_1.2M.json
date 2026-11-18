@@ -1,0 +1,130 @@
+{
+  "pairs": 600000,
+  "games": 1200000,
+  "beta": 1.0,
+  "payoff_cap": null,
+  "raw": {
+    "mean_mEq": 14.992500000000001,
+    "se_mEq": 2.5458668976670173,
+    "ci95_mEq": [
+      10.002600880572647,
+      19.982399119427356
+    ],
+    "pair_variance": 3.8888629563820105
+  },
+  "adjusted": {
+    "mean_mEq": 16.485222235218135,
+    "se_mEq": 0.2313277236856176,
+    "ci95_mEq": [
+      16.03181989679432,
+      16.938624573641945
+    ],
+    "pair_variance": 0.03210750944734166
+  },
+  "correction": {
+    "mean_mEq": -1.4927222352181388,
+    "se_mEq": 2.540734767259193,
+    "ci95_mEq": [
+      -6.472562379046157,
+      3.4871179086098794
+    ],
+    "pair_variance": 3.8731998945357753
+  },
+  "luck_centering": {
+    "pair_z": -0.5875159636707796,
+    "leg_mean_mEq": [
+      -0.3036926495248692,
+      -2.681751820911445
+    ],
+    "leg_z": [
+      -0.0844834985100913,
+      -0.7461949394577079
+    ]
+  },
+  "raw_correction_correlation": 0.9958655614952089,
+  "variance_factor": 121.12004398098802,
+  "runtime_factor": 14.422290741220737,
+  "time_to_precision_gain": 8.398114152199938,
+  "cpu_time_to_precision_gain": 8.384658679298369,
+  "summed_worker_seconds": {
+    "raw": 2881.7532050162918,
+    "corrected": 41561.48256718965
+  },
+  "cpu_seconds": {
+    "raw": 2876.615816464009,
+    "corrected": 41553.96749384223
+  },
+  "corrected_turn_fraction": 0.9742164020811145,
+  "tails": {
+    "max_abs_payoff": 64.0,
+    "games_over_128": 0,
+    "max_abs_correction": 68.20908267614958,
+    "max_abs_adjusted": 11.715172067129203
+  },
+  "ci_method": "fixed-sample normal approximation over independent pair means",
+  "capped128": {
+    "pairs": 600000,
+    "games": 1200000,
+    "beta": 1.0,
+    "payoff_cap": 128,
+    "raw": {
+      "mean_mEq": 14.992500000000001,
+      "se_mEq": 2.5458668976670173,
+      "ci95_mEq": [
+        10.002600880572647,
+        19.982399119427356
+      ],
+      "pair_variance": 3.8888629563820105
+    },
+    "adjusted": {
+      "mean_mEq": 16.485222235218135,
+      "se_mEq": 0.2313277236856176,
+      "ci95_mEq": [
+        16.03181989679432,
+        16.938624573641945
+      ],
+      "pair_variance": 0.03210750944734166
+    },
+    "correction": {
+      "mean_mEq": -1.4927222352181388,
+      "se_mEq": 2.540734767259193,
+      "ci95_mEq": [
+        -6.472562379046157,
+        3.4871179086098794
+      ],
+      "pair_variance": 3.8731998945357753
+    },
+    "luck_centering": {
+      "pair_z": -0.5875159636707796,
+      "leg_mean_mEq": [
+        -0.3036926495248692,
+        -2.681751820911445
+      ],
+      "leg_z": [
+        -0.0844834985100913,
+        -0.7461949394577079
+      ]
+    },
+    "raw_correction_correlation": 0.9958655614952089,
+    "variance_factor": 121.12004398098802,
+    "runtime_factor": 14.422290741220737,
+    "time_to_precision_gain": 8.398114152199938,
+    "cpu_time_to_precision_gain": 8.384658679298369,
+    "summed_worker_seconds": {
+      "raw": 2881.7532050162918,
+      "corrected": 41561.48256718965
+    },
+    "cpu_seconds": {
+      "raw": 2876.615816464009,
+      "corrected": 41553.96749384223
+    },
+    "corrected_turn_fraction": 0.9742164020811145,
+    "tails": {
+      "max_abs_payoff": 64.0,
+      "games_over_128": 0,
+      "max_abs_correction": 68.20908267614958,
+      "max_abs_adjusted": 11.715172067129203
+    },
+    "ci_method": "fixed-sample normal approximation over independent pair means"
+  }
+}

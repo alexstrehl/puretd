@@ -1,19 +1,13 @@
 /*
  * puretd_janowski.c -- Prob5Jan: a cubeless prob5 net under the Janowski
- * money cube layer (BGC_KIND_PROB5JAN), and the bearoff tables it reads
- * (also routed for the cubeful engine: the bgc_i_bo_* helpers at the end,
- * bearoff_td.BearoffTDAgent's exact values, driven by puretd.c).
+ * money cube layer (BGC_KIND_PROB5JAN). Formulas: R. Janowski (1993) in
+ * GNU Backgammon's formulation, as janowski.py.
  *
- * The Python modules are the reference, ported function for function:
+ * The Python modules are the reference, followed function for function:
  *   janowski.py         bgc_jan_equity, _folded, _cubeless_equity, _fold,
  *                       _money_cube_action
- *   bearoff.py          bgc_bearoff (the flat file of export_c_tables),
- *                       exact_probs5, _hazards, _race_dp, _ts_wnd,
- *                       _exact_tier, race_equity, race_cube_values,
- *                       ts_win_prob
  *   janowski_agent.py   JanowskiAgent at its defaults (cube_fold,
- *                       fold_0ply, bearoff_exact iff a table is attached,
- *                       board_sanity per bgc_set_jan): _succ_values
+ *                       fold_0ply, board_sanity per bgc_set_jan): _succ_values
  *                       (row_leaf), _pick, _screen_0ply, _oneply,
  *                       _value_oneply, _static_cube, _cube_values,
  *                       offer_double, respond_to_double,
@@ -21,8 +15,7 @@
  *
  * Numerics: double throughout, every expression in Python's evaluation
  * order (left to right; a * b / c is (a * b) / c), no FMA contraction.
- * Sums are sequential; bearoff.exact_probs5's np.dot (BLAS order) is the
- * one place the order may differ. Net probabilities are fp32 (sanity
+ * Sums are sequential. Net probabilities are fp32 (sanity
  * mask, then the prob5 clamps) widened to double.
  */
 
@@ -32,37 +25,15 @@
 #pragma GCC optimize("fp-contract=off")
 #endif
 
-#define _POSIX_C_SOURCE 200809L
-
 #include "puretd.h"
 #include "puretd_internal.h"
 
-#include <fcntl.h>
 #include <math.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #define JAN_EPS 1e-7            /* janowski._EPS */
 #define JAN_DEFAULT_X 0.76      /* janowski.DEFAULT_X */
-#define BO_R 24                 /* bearoff.R_MAX */
-#define BO_N 15                 /* checkers a side */
-#define HC_SLOTS 1024           /* hazard-DP cache per engine */
-
-/* _DICE_P: d1 = 1..6, d2 = d1..6. */
-static const double DP21[21] = {
-    1.0 / 36.0, 2.0 / 36.0, 2.0 / 36.0, 2.0 / 36.0, 2.0 / 36.0, 2.0 / 36.0,
-    1.0 / 36.0, 2.0 / 36.0, 2.0 / 36.0, 2.0 / 36.0, 2.0 / 36.0,
-    1.0 / 36.0, 2.0 / 36.0, 2.0 / 36.0, 2.0 / 36.0,
-    1.0 / 36.0, 2.0 / 36.0, 2.0 / 36.0,
-    1.0 / 36.0, 2.0 / 36.0,
-    1.0 / 36.0,
-};
-
-static const int FLIP[3] = {PERSP_CENTERED, PERSP_THEIRS, PERSP_MINE};
 
 /* ── conversion (janowski.py) ──────────────────────────────────── */
 
@@ -134,432 +105,6 @@ int bgc_jan_money_cube_action(double nd, double dt, int persp, int jacoby, int *
     return money_double(nd, dt, persp, jacoby);
 }
 
-/* ── bearoff tables (bearoff.py) ───────────────────────────────── */
-
-struct bgc_bearoff {
-    void *map;
-    size_t len;
-    int n_os, n_ts, ts_max;
-    const unsigned char *os_counts, *f, *g, *ts_counts, *P, *V;
-    int *os_idx, *ts_idx;           /* combinatorial rank -> file row */
-    int nc[7][BO_N + 1];            /* nc[k][s]: k-tuples with sum <= s = C(s + k, k) */
-};
-
-static inline double ldf(const unsigned char *b, size_t i) {
-    float v;
-    memcpy(&v, b + 4 * i, sizeof v);
-    return (double)v;
-}
-
-/* Lexicographic rank of c[0..5] among the 6-tuples with sum <= nmax. */
-static int bo_rank(const bgc_bearoff *t, const int c[6], int nmax) {
-    int rank = 0, rem = nmax;
-    for (int i = 0; i < 6; i++) {
-        rank += t->nc[6 - i][rem] - t->nc[6 - i][rem - c[i]];
-        rem -= c[i];
-    }
-    return rank;
-}
-
-static int rank_table(const bgc_bearoff *t, const unsigned char *counts, int n, int nmax,
-                      int *idx) {
-    for (int i = 0; i < n; i++) idx[i] = -1;
-    for (int i = 0; i < n; i++) {
-        int c[6], s = 0;
-        for (int j = 0; j < 6; j++) { c[j] = counts[6 * i + j]; s += c[j]; }
-        if (s > nmax) return -1;
-        int r = bo_rank(t, c, nmax);
-        if (r < 0 || r >= n || idx[r] >= 0) return -1;
-        idx[r] = i;
-    }
-    return 0;
-}
-
-bgc_bearoff *bgc_bearoff_open(const char *path, char *err, size_t errlen) {
-    if (err && errlen) err[0] = 0;
-#define BO_FAIL(...) do { if (err && errlen) snprintf(err, errlen, __VA_ARGS__); goto fail; } while (0)
-    bgc_bearoff *t = calloc(1, sizeof(*t));
-    int fd = -1;
-    if (!t) { if (err && errlen) snprintf(err, errlen, "bgc_bearoff_open: out of memory"); return NULL; }
-    const uint32_t one = 1;
-    if (*(const unsigned char *)&one != 1) BO_FAIL("bgc_bearoff_open: big-endian host");
-    fd = path ? open(path, O_RDONLY) : -1;
-    if (fd < 0) BO_FAIL("bgc_bearoff_open: cannot open %s", path ? path : "(null)");
-    struct stat st;
-    if (fstat(fd, &st) || st.st_size < 24) BO_FAIL("bgc_bearoff_open: %s: too short", path);
-    t->len = (size_t)st.st_size;
-    t->map = mmap(NULL, t->len, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-    fd = -1;
-    if (t->map == MAP_FAILED) { t->map = NULL; BO_FAIL("bgc_bearoff_open: %s: mmap failed", path); }
-    const unsigned char *b = t->map;
-    uint32_t h[6];
-    memcpy(h, b, sizeof h);
-    if (memcmp(b, "BGBO", 4) || h[1] != 1)
-        BO_FAIL("bgc_bearoff_open: %s: not a BGBO version 1 file (bearoff.export_c_tables)", path);
-    for (int k = 0; k <= 6; k++)
-        for (int s = 0; s <= BO_N; s++)
-            t->nc[k][s] = k == 0 ? 1 : t->nc[k - 1][s] + (s ? t->nc[k][s - 1] : 0);
-    t->n_os = (int)h[2];
-    t->ts_max = (int)h[5];
-    t->n_ts = (int)h[4];
-    if (t->n_os != t->nc[6][BO_N] || h[3] != BO_R || t->ts_max < 1 || t->ts_max > BO_N
-        || t->n_ts != t->nc[6][t->ts_max])
-        BO_FAIL("bgc_bearoff_open: %s: unexpected sizes (n_os %u, R %u, n_ts %u, ts_max %u)",
-                path, h[2], h[3], h[4], h[5]);
-    const size_t nos = (size_t)t->n_os, nts = (size_t)t->n_ts;
-    const size_t need = 24 + nos * 6 + 2 * nos * BO_R * 4 + nts * 6 + nts * nts * 4
-                        + nts * nts * 12;
-    if (t->len != need) BO_FAIL("bgc_bearoff_open: %s: %zu bytes, expected %zu", path, t->len, need);
-    size_t o = 24;
-    t->os_counts = b + o; o += nos * 6;
-    t->f = b + o;         o += nos * BO_R * 4;
-    t->g = b + o;         o += nos * BO_R * 4;
-    t->ts_counts = b + o; o += nts * 6;
-    t->P = b + o;         o += nts * nts * 4;
-    t->V = b + o;
-    t->os_idx = malloc(nos * sizeof(int));
-    t->ts_idx = malloc(nts * sizeof(int));
-    if (!t->os_idx || !t->ts_idx) BO_FAIL("bgc_bearoff_open: out of memory");
-    if (rank_table(t, t->os_counts, t->n_os, BO_N, t->os_idx)
-        || rank_table(t, t->ts_counts, t->n_ts, t->ts_max, t->ts_idx))
-        BO_FAIL("bgc_bearoff_open: %s: position lists are not the complete sets", path);
-    return t;
-fail:
-    if (fd >= 0) close(fd);
-    bgc_bearoff_close(t);
-    return NULL;
-#undef BO_FAIL
-}
-
-void bgc_bearoff_close(bgc_bearoff *t) {
-    if (!t) return;
-    if (t->map) munmap(t->map, t->len);
-    free(t->os_idx);
-    free(t->ts_idx);
-    free(t);
-}
-
-/* A position's bearoff view: home counts by distance 1..6 of the player
-   on roll (me) and the opponent, their off counts, bearoff class. */
-typedef struct { int me[6], opp[6], off_me, off_opp, cls; } bo_view;
-
-static int sum6(const int c[6]) { return c[0] + c[1] + c[2] + c[3] + c[4] + c[5]; }
-
-/* bearoff.is_bearoff_class + home_counts of a BoardState. */
-static void view_state(const BoardState *s, bo_view *v) {
-    const int me = s->turn, op = 1 - s->turn;
-    v->cls = !s->bar[WHITE] && !s->bar[BLACK];
-    for (int i = 6; i < 24 && v->cls; i++) if (s->points[i] > 0) v->cls = 0;
-    for (int i = 0; i < 18 && v->cls; i++) if (s->points[i] < 0) v->cls = 0;
-    for (int i = 0; i < 6; i++) {
-        const int w = s->points[i] > 0 ? s->points[i] : 0;
-        const int bl = s->points[23 - i] < 0 ? -s->points[23 - i] : 0;
-        v->me[i] = me == WHITE ? w : bl;
-        v->opp[i] = op == WHITE ? w : bl;
-    }
-    v->off_me = s->off[me];
-    v->off_opp = s->off[op];
-    if (sum6(v->me) > BO_N || sum6(v->opp) > BO_N) v->cls = 0;
-}
-
-/* janowski_agent._feature_counts of one point's thermometer. */
-static inline int therm_count(const float *f) {
-    return (int)rint((double)f[0] + (double)f[1] + (double)f[2] + 2.0 * (double)f[3]);
-}
-
-/* The same from a perspective196 row (_bearoff_class_features): the me
-   block [0, 98), the opponent's [98, 196) in the same frame. */
-static void view_row(const float *f, bo_view *v) {
-    v->cls = rint((double)f[96] * 2.0) == 0.0 && rint((double)f[194] * 2.0) == 0.0;
-    for (int k = 6; k < 24 && v->cls; k++) if (therm_count(f + 4 * k)) v->cls = 0;
-    for (int k = 0; k < 18 && v->cls; k++) if (therm_count(f + 98 + 4 * k)) v->cls = 0;
-    if (!v->cls) return;
-    for (int i = 0; i < 6; i++) {
-        v->me[i] = therm_count(f + 4 * i);
-        v->opp[i] = therm_count(f + 98 + 4 * (23 - i));
-    }
-    v->off_me = (int)rint((double)f[97] * 15.0);
-    v->off_opp = (int)rint((double)f[195] * 15.0);
-    if (sum6(v->me) > BO_N || sum6(v->opp) > BO_N) v->cls = 0;
-}
-
-static inline int os_row(const bgc_bearoff *t, const int c[6]) {
-    return t->os_idx[bo_rank(t, c, BO_N)];
-}
-
-static void os_dist(const bgc_bearoff *t, const unsigned char *tab, int row, double d[BO_R]) {
-    for (int r = 0; r < BO_R; r++) d[r] = ldf(tab, (size_t)row * BO_R + r);
-}
-
-static void cumsum(const double *a, double *c) {
-    c[0] = a[0];
-    for (int r = 1; r < BO_R; r++) c[r] = c[r - 1] + a[r];
-}
-
-/* bearoff.exact_probs5 (np.dot as a sequential sum). */
-static void exact_probs5(const bgc_bearoff *t, const bo_view *v, double p[5]) {
-    double fm[BO_R], gm[BO_R], fo[BO_R], go[BO_R], Fo[BO_R], Go[BO_R], Gm[BO_R];
-    const int im = os_row(t, v->me), io = os_row(t, v->opp);
-    os_dist(t, t->f, im, fm);
-    os_dist(t, t->g, im, gm);
-    os_dist(t, t->f, io, fo);
-    os_dist(t, t->g, io, go);
-    cumsum(fo, Fo);
-    cumsum(go, Go);
-    cumsum(gm, Gm);
-    double s = 0.0;
-    for (int r = 0; r < BO_R; r++) s += fm[r] * (r ? 1.0 - Fo[r - 1] : 1.0);
-    p[0] = s;
-    p[1] = 0.0;
-    if (v->off_opp == 0) {
-        s = 0.0;
-        for (int r = 0; r < BO_R; r++) s += fm[r] * (r ? 1.0 - Go[r - 1] : 1.0);
-        p[1] = s;
-    }
-    p[2] = 0.0;
-    p[3] = 0.0;
-    if (v->off_me == 0) {
-        s = 0.0;
-        for (int r = 0; r < BO_R; r++) s += fo[r] * (1.0 - Gm[r]);
-        p[3] = s;
-    }
-    p[4] = 0.0;
-}
-
-/* bearoff._hazards, then np.round(h, 12) = rint(h * 1e12) / 1e12. */
-static void hazards(const double f[BO_R], double h[BO_R]) {
-    double F[BO_R];
-    cumsum(f, F);
-    for (int k = 0; k < BO_R; k++) {
-        const double surv = 1.0 - (k > 0 ? F[k - 1] : 0.0);
-        double x = 1.0;
-        if (!(surv <= 1e-12)) {
-            const double q = f[k] / surv;
-            x = q < 1.0 ? q : 1.0;
-        }
-        h[k] = rint(x * 1e12) / 1e12;
-    }
-}
-
-/* bearoff._race_dp's memo: side x = 0 (A, on roll at the root) or 1. */
-typedef struct {
-    double h[2][BO_R];
-    double v[2][BO_R + 1][BO_R + 1][3];
-    unsigned char set[2][BO_R + 1][BO_R + 1][3];
-} race_memo;
-
-static double race_V(race_memo *m, int x, int k, int j, int c);
-
-static double race_W(race_memo *m, int x, int k, int j, int c) {
-    const double h = k < BO_R ? m->h[x][k] : 1.0;
-    if (h >= 1.0) return 1.0;
-    return h - (1.0 - h) * race_V(m, 1 - x, j, k + 1, FLIP[c]);
-}
-
-static double race_V(race_memo *m, int x, int k, int j, int c) {
-    if (m->set[x][k][j][c]) return m->v[x][k][j][c];
-    const double nd = race_W(m, x, k, j, c);
-    double v = nd;
-    if (c != PERSP_THEIRS) {
-        const double dt = 2.0 * race_W(m, x, k, j, PERSP_THEIRS);
-        const double cap = 1.0 < dt ? 1.0 : dt;
-        v = cap > nd ? cap : nd;
-    }
-    m->set[x][k][j][c] = 1;
-    m->v[x][k][j][c] = v;
-    return v;
-}
-
-/* _race_dp(hm, ho, c) for c = 0, 1, 2 (one memo: the same values). */
-static void race_dp3(const bgc_bearoff *t, int im, int io, double out[3]) {
-    race_memo *m = malloc(sizeof(*m));
-    double f[BO_R];
-    if (!m) { out[0] = out[1] = out[2] = NAN; return; }
-    memset(m->set, 0, sizeof(m->set));
-    os_dist(t, t->f, im, f);
-    hazards(f, m->h[0]);
-    os_dist(t, t->f, io, f);
-    hazards(f, m->h[1]);
-    for (int c = 0; c < 3; c++) out[c] = race_W(m, 0, 0, 0, c);
-    free(m);
-}
-
-/* bearoff._ts_wnd(ia, ib): window-free values, one dice pass over V with
-   the legal plays of the parked one-sided board. plays: MAX_PLAYS. */
-static void ts_wnd(const bgc_bearoff *t, int ia, int ib, Play *plays, double wnd[3]) {
-    BoardState st;
-    memset(&st, 0, sizeof st);
-    for (int j = 0; j < 6; j++) st.points[j] = t->ts_counts[6 * ia + j];
-    st.points[23] = -15;
-    st.turn = WHITE;
-    const int zero = t->ts_idx[0];
-    const size_t vb = (size_t)ib * t->n_ts * 3;
-    wnd[0] = wnd[1] = wnd[2] = 0.0;
-    int k = 0;
-    for (int d1 = 1; d1 <= 6; d1++) {
-        for (int d2 = d1; d2 <= 6; d2++, k++) {
-            const double pd = DP21[k];
-            const int n = get_legal_plays(&st, d1, d2, plays, MAX_PLAYS);
-            double m[3] = {INFINITY, INFINITY, INFINITY};
-            int clears = 0;
-            for (int i = 0; i < n; i++) {
-                int c[6];
-                for (int j = 0; j < 6; j++) {
-                    const int q = plays[i].resulting_state.points[j];
-                    c[j] = q > 0 ? q : 0;
-                }
-                const int s = t->ts_idx[bo_rank(t, c, t->ts_max)];
-                if (s == zero) { clears = 1; break; }
-                for (int q = 0; q < 3; q++) {
-                    const double val = ldf(t->V, vb + (size_t)s * 3 + q);
-                    if (val < m[q]) m[q] = val;
-                }
-            }
-            if (clears) {
-                wnd[0] += pd; wnd[1] += pd; wnd[2] += pd;
-                continue;
-            }
-            wnd[PERSP_CENTERED] += pd * (-m[PERSP_CENTERED]);
-            wnd[PERSP_MINE] += pd * (-m[PERSP_THEIRS]);
-            wnd[PERSP_THEIRS] += pd * (-m[PERSP_MINE]);
-        }
-    }
-}
-
-enum { TIER_NONE = 0, TIER_TS = 1, TIER_HAZ = 2 };
-
-/* bearoff._exact_tier: TS with (a, b) = TS rows of (me, opp); HAZ with
-   (a, b) = one-sided rows; NONE. */
-static int exact_tier(const bgc_bearoff *t, const bo_view *v, int *a, int *b) {
-    if (!v->cls || v->off_me >= BO_N || v->off_opp >= BO_N) return TIER_NONE;
-    if (sum6(v->me) <= t->ts_max && sum6(v->opp) <= t->ts_max) {
-        *a = t->ts_idx[bo_rank(t, v->me, t->ts_max)];
-        *b = t->ts_idx[bo_rank(t, v->opp, t->ts_max)];
-        return TIER_TS;
-    }
-    if (v->off_me == 0 || v->off_opp == 0) return TIER_NONE;    /* gammons possible */
-    *a = os_row(t, v->me);
-    *b = os_row(t, v->opp);
-    double s = 0.0;
-    for (int r = 0; r < BO_R; r++) s += ldf(t->f, (size_t)*a * BO_R + r);
-    return s < 0.5 ? TIER_NONE : TIER_HAZ;
-}
-
-static inline double ts_V(const bgc_bearoff *t, int a, int b, int c) {
-    return ldf(t->V, ((size_t)a * t->n_ts + b) * 3 + c);
-}
-
-/* bearoff.ts_win_prob: 1 and *p, or 0 (None). */
-static int ts_P(const bgc_bearoff *t, const bo_view *v, double *p) {
-    if (!v->cls || sum6(v->me) > t->ts_max || sum6(v->opp) > t->ts_max) return 0;
-    *p = ldf(t->P, (size_t)t->ts_idx[bo_rank(t, v->me, t->ts_max)] * t->n_ts
-                   + t->ts_idx[bo_rank(t, v->opp, t->ts_max)]);
-    return 1;
-}
-
-/* race_equity of a HAZ tier from its _race_dp values. */
-static double haz_equity(const double dp[3], int persp, int fold) {
-    const double nd = dp[persp];
-    if (!(fold && persp != PERSP_THEIRS)) return nd;
-    const double dt = 2.0 * dp[PERSP_THEIRS];
-    const double cap = 1.0 < dt ? 1.0 : dt;
-    return cap > nd ? cap : nd;
-}
-
-typedef struct { int a, b; double dp[3]; } haz_slot;
-
-/* _race_dp values of one-sided rows (a, b) through a cache of HC_SLOTS
-   (NaN in dp[0] on allocation failure, not cached). */
-static void haz_cached(haz_slot *hc, const bgc_bearoff *t, int a, int b, double dp[3]) {
-    haz_slot *h = &hc[((unsigned)a * 40503u + (unsigned)b) & (HC_SLOTS - 1)];
-    if (h->a == a && h->b == b) {
-        memcpy(dp, h->dp, sizeof h->dp);
-        return;
-    }
-    race_dp3(t, a, b, dp);
-    if (isnan(dp[0])) return;
-    h->a = a;
-    h->b = b;
-    memcpy(h->dp, dp, sizeof h->dp);
-}
-
-/* ── the tables alone ──────────────────────────────────────────── */
-
-static int bo_args_ok(const bgc_bearoff *t, const BoardState *s) {
-    return t && s && (s->turn == WHITE || s->turn == BLACK);
-}
-
-int bgc_bo_exact_probs5(const bgc_bearoff *t, const BoardState *s, double p[5]) {
-    if (!bo_args_ok(t, s) || !p) return -1;
-    bo_view v;
-    view_state(s, &v);
-    if (!v.cls) return 0;
-    exact_probs5(t, &v, p);
-    return 1;
-}
-
-int bgc_bo_ts_win_prob(const bgc_bearoff *t, const BoardState *s, double *p) {
-    if (!bo_args_ok(t, s) || !p) return -1;
-    bo_view v;
-    view_state(s, &v);
-    return ts_P(t, &v, p);
-}
-
-/* (nd, dt) of a tier (_tier_cube_values). plays: ts_wnd scratch or NULL
-   (allocated here). 0, -1 on allocation failure. */
-static int tier_cube_values(const bgc_bearoff *t, int tier, int a, int b, int persp,
-                            Play *plays, double *nd, double *dt) {
-    double w[3];
-    if (tier == TIER_TS) {
-        Play *own = plays ? NULL : malloc(MAX_PLAYS * sizeof(Play));
-        if (!plays && !own) return -1;
-        ts_wnd(t, a, b, plays ? plays : own, w);
-        free(own);
-    } else {
-        race_dp3(t, a, b, w);
-        if (isnan(w[0])) return -1;
-    }
-    *nd = w[persp];
-    *dt = 2.0 * w[PERSP_THEIRS];
-    return 0;
-}
-
-int bgc_bo_race_cube_values(const bgc_bearoff *t, const BoardState *s, int persp,
-                            double *nd, double *dt) {
-    if (!bo_args_ok(t, s) || !nd || !dt || persp < 0 || persp > 2) return -1;
-    bo_view v;
-    view_state(s, &v);
-    int a, b;
-    const int tier = exact_tier(t, &v, &a, &b);
-    if (tier == TIER_NONE) return 0;
-    return tier_cube_values(t, tier, a, b, persp, NULL, nd, dt) ? -1 : 1;
-}
-
-int bgc_bo_race_equity(const bgc_bearoff *t, const BoardState *s, int persp, int fold,
-                       double *out) {
-    if (!bo_args_ok(t, s) || !out || persp < 0 || persp > 2) return -1;
-    bo_view v;
-    view_state(s, &v);
-    int a, b;
-    const int tier = exact_tier(t, &v, &a, &b);
-    if (tier == TIER_NONE) return 0;
-    const int f = fold && persp != PERSP_THEIRS;
-    if (tier == TIER_TS && (f || persp == PERSP_THEIRS)) {
-        *out = ts_V(t, a, b, persp);
-        return 1;
-    }
-    double nd, dt;
-    if (tier_cube_values(t, tier, a, b, persp, NULL, &nd, &dt)) return -1;
-    if (f) {
-        const double cap = 1.0 < dt ? 1.0 : dt;
-        *out = cap > nd ? cap : nd;
-    } else {
-        *out = nd;
-    }
-    return 1;
-}
-
 /* ── the engine's state ────────────────────────────────────────── */
 
 /* A leaf (successor row or terminal reply), the leaf player's view:
@@ -569,14 +114,11 @@ typedef struct { double v[2], sec, p[5]; } leaf;
 struct bgc_jan {
     double x;
     int board_sanity;
-    const bgc_bearoff *bo;          /* NULL: bearoff_exact off */
     leaf *lf;                       /* per batch row */
     int cap_lf;
     leaf *c0;                       /* 0-ply leaves of the candidates, MAX_PLAYS */
-    unsigned char *ex0;             /* candidate is exact (terminal, table tier) */
+    unsigned char *ex0;             /* candidate is terminal */
     double *sc, *ss;                /* 1-ply (score, sec) per candidate */
-    Play *tsplays;                  /* ts_wnd scratch, MAX_PLAYS, lazily */
-    haz_slot hc[HC_SLOTS];          /* _race_dp cache by one-sided rows */
 };
 
 struct bgc_jan *bgc_i_jan_new(void) {
@@ -588,14 +130,13 @@ struct bgc_jan *bgc_i_jan_new(void) {
     j->ex0 = malloc(MAX_PLAYS);
     j->sc = malloc(MAX_PLAYS * sizeof(double));
     j->ss = malloc(MAX_PLAYS * sizeof(double));
-    for (int i = 0; i < HC_SLOTS; i++) j->hc[i].a = -1;
     if (!j->c0 || !j->ex0 || !j->sc || !j->ss) { bgc_i_jan_free(j); return NULL; }
     return j;
 }
 
 void bgc_i_jan_free(struct bgc_jan *j) {
     if (!j) return;
-    free(j->lf); free(j->c0); free(j->ex0); free(j->sc); free(j->ss); free(j->tsplays);
+    free(j->lf); free(j->c0); free(j->ex0); free(j->sc); free(j->ss);
     free(j);
 }
 
@@ -607,18 +148,6 @@ int bgc_set_jan(bgc_engine *e, const bgc_jan_opts *o) {
     j->x = x;
     j->board_sanity = o ? o->board_sanity != 0 : 1;
     return 0;
-}
-
-int bgc_set_bearoff(bgc_engine *e, const bgc_bearoff *t) {
-    if (e && bgc_kind(e) == BGC_KIND_CUBEFUL) return bgc_i_cubeful_set_bearoff(e, t);
-    if (!e || bgc_kind(e) != BGC_KIND_PROB5JAN) return -1;
-    bgc_i_jan(e)->bo = t;
-    return 0;
-}
-
-/* _race_dp values of one-sided rows (a, b), cached. */
-static void haz_dp(struct bgc_jan *j, int a, int b, double dp[3]) {
-    haz_cached(j->hc, j->bo, a, b, dp);
 }
 
 /* Branch cubes: the leaf player's cube perspective, jacoby and whether
@@ -662,46 +191,14 @@ static void row_probs(const struct bgc_jan *j, const float *x, const float *y, d
     for (int k = 0; k < 5; k++) p[k] = (double)c[k];
 }
 
-/* _succ_values for one non-terminal row (fold on, exact_fold on): the
-   table tiers, else exact probabilities in a gammonish bearoff, else the
-   net's, through the folded conversion. Returns 1 for a table-tier row
-   (exact: unexpanded at 1-ply). */
-static int row_leaf(struct bgc_jan *j, const branches *br, const float *x, const float *y,
-                    leaf *L) {
-    int exact = 0;
-    if (j->bo) {
-        bo_view v;
-        view_row(x, &v);
-        if (v.cls) {
-            const bgc_bearoff *t = j->bo;
-            int a, b;
-            const int tier = exact_tier(t, &v, &a, &b);
-            if (tier == TIER_TS) {
-                for (int k = 0; k < br->n; k++) L->v[k] = ts_V(t, a, b, br->persp[k]);
-                L->p[0] = ldf(t->P, (size_t)a * t->n_ts + b);
-                exact = 1;
-            } else if (tier == TIER_HAZ) {
-                double dp[3], ep[5];
-                haz_dp(j, a, b, dp);
-                for (int k = 0; k < br->n; k++) L->v[k] = haz_equity(dp, br->persp[k], 1);
-                exact_probs5(t, &v, ep);
-                L->p[0] = ep[0];
-                exact = 1;
-            } else {
-                exact_probs5(t, &v, L->p);
-            }
-            if (exact) L->p[1] = L->p[2] = L->p[3] = L->p[4] = 0.0;
-            else for (int k = 0; k < br->n; k++)
-                L->v[k] = bgc_jan_equity_folded(L->p, br->persp[k], j->x, br->jac[k]);
-            L->sec = bgc_jan_cubeless_equity(L->p);
-            return exact;
-        }
-    }
+/* _succ_values for one non-terminal row (fold on): the net's
+   probabilities through the folded conversion. */
+static void row_leaf(struct bgc_jan *j, const branches *br, const float *x, const float *y,
+                     leaf *L) {
     row_probs(j, x, y, L->p);
     for (int k = 0; k < br->n; k++)
         L->v[k] = bgc_jan_equity_folded(L->p, br->persp[k], j->x, br->jac[k]);
     L->sec = bgc_jan_cubeless_equity(L->p);
-    return 0;
 }
 
 static int ensure_lf(struct bgc_jan *j, int n) {
@@ -805,7 +302,7 @@ double bgc_i_jan_value1(bgc_engine *e, const BoardState *s, const bgc_cube *cube
 
 /* choose_checker_action_cubeful over the n candidates in the batch's
    plays: 0-ply screen (opponent's view, folded), then at 1-ply every
-   candidate (n > 1), exact ones keeping their 0-ply (value, sec). cscore
+   candidate (n > 1), game-ending ones keeping their 0-ply (value, sec). cscore
    = mover view = -value. Returns the pick, -2 on error. */
 int bgc_i_jan_choose(bgc_engine *e, const BoardState *s, int n, const bgc_cube *cube,
                      int plies) {
@@ -825,8 +322,9 @@ int bgc_i_jan_choose(bgc_engine *e, const BoardState *s, int n, const bgc_cube *
             leaf_terminal(&br, bgc_i_game_result(rs), &j->c0[i]);
             j->ex0[i] = 1;
         } else {
-            j->ex0[i] = (unsigned char)row_leaf(j, &br, bt.x + (size_t)i * bt.ldx,
-                                                bt.y + (size_t)i * bt.out_dim, &j->c0[i]);
+            row_leaf(j, &br, bt.x + (size_t)i * bt.ldx, bt.y + (size_t)i * bt.out_dim,
+                     &j->c0[i]);
+            j->ex0[i] = 0;
         }
         j->sc[i] = j->c0[i].v[0];
         j->ss[i] = j->c0[i].sec;
@@ -862,29 +360,6 @@ static int jan_cube_values(bgc_engine *e, const BoardState *s, const bgc_cube *c
                            int plies, double *nd, double *dt) {
     struct bgc_jan *j = bgc_i_jan(e);
     const int persp = cube_persp(cube->owner, s->turn);
-    double p[5];
-    int have_p = 0;
-    if (j->bo) {
-        bo_view v;
-        view_state(s, &v);
-        if (v.cls) {
-            int a, b;
-            const int tier = exact_tier(j->bo, &v, &a, &b);
-            if (tier == TIER_TS) {
-                if (!j->tsplays && !(j->tsplays = malloc(MAX_PLAYS * sizeof(Play)))) return -1;
-                return tier_cube_values(j->bo, tier, a, b, persp, j->tsplays, nd, dt);
-            }
-            if (tier == TIER_HAZ) {
-                double dp[3];
-                haz_dp(j, a, b, dp);
-                if (isnan(dp[0])) return -1;
-                *nd = dp[persp];
-                *dt = 2.0 * dp[PERSP_THEIRS];
-                return 0;
-            }
-            if (plies == 0) { exact_probs5(j->bo, &v, p); have_p = 1; }
-        }
-    }
     if (plies == 1) {
         double v[2], sec;
         if (jan_oneply(e, s, cube, 2, v, &sec)) return -1;
@@ -892,7 +367,8 @@ static int jan_cube_values(bgc_engine *e, const BoardState *s, const bgc_cube *c
         *dt = 2.0 * v[1];
         return 0;
     }
-    if (!have_p) root_probs(e, s, p);
+    double p[5];
+    root_probs(e, s, p);
     *nd = bgc_jan_equity(p, persp, j->x, cube->jacoby);
     *dt = 2.0 * bgc_jan_equity(p, PERSP_THEIRS, j->x, cube->jacoby);
     return 0;
@@ -942,102 +418,4 @@ int bgc_i_jan_respond(bgc_engine *e, const BoardState *s, const bgc_cube *cube, 
     double nd, dt;
     if (jan_cube_values(e, s, cube, plies, &nd, &dt)) return -1;
     return dt <= 1.0;
-}
-
-/* ── CUBEFUL bearoff routing (puretd.c; bearoff_td.BearoffTDAgent) ── */
-
-struct bgc_boroute {
-    const bgc_bearoff *t;
-    int hazard;                     /* route the hazard tier too (_exact_tier) */
-    Play *tsplays;                  /* ts_wnd scratch, MAX_PLAYS, lazily */
-    haz_slot hc[HC_SLOTS];          /* _race_dp cache by one-sided rows */
-};
-
-struct bgc_boroute *bgc_i_bo_new(const bgc_bearoff *t, int hazard) {
-    struct bgc_boroute *r = calloc(1, sizeof(*r));
-    if (!r) return NULL;
-    r->t = t;
-    r->hazard = hazard != 0;
-    for (int i = 0; i < HC_SLOTS; i++) r->hc[i].a = -1;
-    return r;
-}
-
-void bgc_i_bo_free(struct bgc_boroute *r) {
-    if (!r) return;
-    free(r->tsplays);
-    free(r);
-}
-
-void bgc_i_bo_set_hazard(struct bgc_boroute *r, int hazard) { r->hazard = hazard != 0; }
-
-/* bearoff.may_reach_bearoff: pips outside home (19 a bar checker) within
-   one move for the player on roll, and within one more (plies >= 2) or
-   none for the other. */
-int bgc_i_bo_may_reach(const BoardState *s, int plies) {
-    int out[2];
-    for (int p = 0; p < 2; p++) {
-        int n = 19 * s->bar[p];
-        for (int i = 0; i < 24; i++) {
-            const int v = s->points[i];
-            if (p == WHITE && v > 0 && i >= 6) n += v * (i - 6 + 1);
-            else if (p == BLACK && v < 0 && i < 18) n += -v * (18 - i);
-        }
-        out[p] = n;
-    }
-    return out[s->turn] <= 24 && out[1 - s->turn] <= (plies >= 2 ? 24 : 0);
-}
-
-/* _exact_tier of a view under r's tiers. */
-static int route_tier(const struct bgc_boroute *r, const bo_view *v, int *a, int *b) {
-    const int tier = exact_tier(r->t, v, a, b);
-    return tier == TIER_HAZ && !r->hazard ? TIER_NONE : tier;
-}
-
-/* race_equity(., c, with_own_fold=True) for c = 0..2 of a view. */
-static int folded_view(struct bgc_boroute *r, const bo_view *v, double out[3]) {
-    if (!v->cls) return 0;
-    int a, b;
-    const int tier = route_tier(r, v, &a, &b);
-    if (tier == TIER_NONE) return 0;
-    if (tier == TIER_TS) {                  /* V is the fold (build_ts_table) */
-        for (int c = 0; c < 3; c++) out[c] = ts_V(r->t, a, b, c);
-        return 1;
-    }
-    double dp[3];
-    haz_cached(r->hc, r->t, a, b, dp);
-    if (isnan(dp[0])) return -1;
-    for (int c = 0; c < 3; c++) out[c] = haz_equity(dp, c, 1);
-    return 1;
-}
-
-int bgc_i_bo_folded(struct bgc_boroute *r, const BoardState *s, double v[3]) {
-    bo_view w;
-    view_state(s, &w);
-    return folded_view(r, &w, v);
-}
-
-int bgc_i_bo_folded_row(struct bgc_boroute *r, const float *row, double v[3]) {
-    bo_view w;
-    view_row(row, &w);
-    return folded_view(r, &w, v);
-}
-
-int bgc_i_bo_cube(struct bgc_boroute *r, const BoardState *s, int persp, double *nd,
-                  double *dt) {
-    bo_view v;
-    view_state(s, &v);
-    if (!v.cls) return 0;
-    int a, b;
-    const int tier = route_tier(r, &v, &a, &b);
-    if (tier == TIER_NONE) return 0;
-    if (tier == TIER_TS) {
-        if (!r->tsplays && !(r->tsplays = malloc(MAX_PLAYS * sizeof(Play)))) return -1;
-        return tier_cube_values(r->t, tier, a, b, persp, r->tsplays, nd, dt) ? -1 : 1;
-    }
-    double dp[3];
-    haz_cached(r->hc, r->t, a, b, dp);
-    if (isnan(dp[0])) return -1;
-    *nd = dp[persp];
-    *dt = 2.0 * dp[PERSP_THEIRS];
-    return 1;
 }

@@ -1,0 +1,132 @@
+# python experiments/benchmarks/aggregate_sweeps.py experiments/benchmarks/results/zen5_9600x_20261113/<group>/<job>_sweep*.txt, per job; rates in decisions/s (moves/s, evals/s)
+# slow/sagewarm is the 'Open Sage 1-ply filtered' row of record (caches kept, c41f4f39); the
+# same-named row inside slow/bench cleared caches before every item and is superseded.
+
+## fast/bench
+8 sweeps, t(7 df) = 2.365
+
+row                                                             mean            95% t-interval     +-%     sd%
+FIXEDPOOL findbestmove 0-ply (default filters)               42728.4        [42572.7, 42884.1]   0.36%   0.44%
+FIXEDPOOL findbestmove 1-ply (default filters)                1337.9          [1335.0, 1340.8]   0.22%   0.26%
+FIXEDPOOL cubeful findbestmove 0-ply (default filters)       41607.2        [41344.0, 41870.4]   0.63%   0.76%
+FIXEDPOOL cubeful findbestmove 1-ply (default filters)        1436.4          [1428.4, 1444.3]   0.55%   0.66%
+FIXEDPOOL cube cfevaluate 0-ply                             714856.0      [712356.8, 717355.2]   0.35%   0.42%
+FIXEDPOOL cube cfevaluate 1-ply                               4106.7          [4083.3, 4130.1]   0.57%   0.68%
+FP prob5c[torch]-0ply checker                                 5093.6          [5060.0, 5127.1]   0.66%   0.79%
+FP prob5c[simd]-0ply checker                                 36835.1        [36670.1, 37000.1]   0.45%   0.54%
+FP sage-0ply checker                                         19860.5        [19795.8, 19925.2]   0.33%   0.39%
+FP sage-1ply checker                                          1086.8          [1083.0, 1090.7]   0.35%   0.42%
+FP PureTD-C[torch] 0-ply (4L cubeful) checker                 5637.9          [5633.1, 5642.7]   0.09%   0.10%
+FP PureTD-C[torch] 0-ply (4L cubeful) cube                   24512.9        [24255.2, 24770.5]   1.05%   1.26%
+FP PureTD-C[simd] 0-ply (4L cubeful) checker                 43442.1        [43148.3, 43736.0]   0.68%   0.81%
+FP PureTD-C[simd] 0-ply (4L cubeful) cube                   264044.8      [262901.8, 265187.8]   0.43%   0.52%
+FP Open Sage 0-ply checker                                   20265.1        [20185.9, 20344.3]   0.39%   0.47%
+FP Open Sage 0-ply cube                                     349126.2      [347643.6, 350608.7]   0.42%   0.51%
+
+  between-sweep sd across rows: median 0.51%, range 0.10-1.26%
+  (the design assumes ~1.5%; if these are much larger, add sweeps)
+
+## fast/capacity
+8 sweeps, t(7 df) = 2.365
+
+row                                            mean            95% t-interval     +-%     sd%
+FP cfs-1L[torch] 39d75783 checker           28283.9        [28074.1, 28493.6]   0.74%   0.89%
+FP cfs-1L[torch] 39d75783 cube             124781.1      [123348.8, 126213.4]   1.15%   1.37%
+FP cfs-1L[simd] 39d75783 checker           189387.8      [188807.5, 189968.1]   0.31%   0.37%
+FP cfs-1L[simd] 39d75783 cube             1019114.9    [1016563.7, 1021666.1]   0.25%   0.30%
+FP cfs-2L[torch] 1ddbb775 checker            8580.6          [8570.5, 8590.8]   0.12%   0.14%
+FP cfs-2L[torch] 1ddbb775 cube              36117.7        [35293.1, 36942.2]   2.28%   2.73%
+FP cfs-2L[simd] 1ddbb775 checker            64810.1        [64572.8, 65047.3]   0.37%   0.44%
+FP cfs-2L[simd] 1ddbb775 cube              378471.5      [376132.2, 380810.9]   0.62%   0.74%
+FP cf3L-mod[torch] 27a728cf checker          6386.1          [6379.8, 6392.3]   0.10%   0.12%
+FP cf3L-mod[torch] 27a728cf cube            25872.3        [24835.0, 26909.5]   4.01%   4.79%
+FP cf3L-mod[simd] 27a728cf checker          46574.0        [46428.5, 46719.5]   0.31%   0.37%
+FP cf3L-mod[simd] 27a728cf cube            282606.8      [279471.4, 285742.2]   1.11%   1.33%
+FP cf4L[torch] 6afda0f8 checker              5646.1          [5640.6, 5651.6]   0.10%   0.12%
+FP cf4L[torch] 6afda0f8 cube                23594.8        [22609.2, 24580.4]   4.18%   5.00%
+FP cf4L[simd] 6afda0f8 checker              43549.8        [43452.5, 43647.1]   0.22%   0.27%
+FP cf4L[simd] 6afda0f8 cube                263041.1      [260893.1, 265189.1]   0.82%   0.98%
+FP cf5L-f9[torch] 37e41475 checker           5062.2          [5056.7, 5067.8]   0.11%   0.13%
+FP cf5L-f9[torch] 37e41475 cube             21826.9        [21632.3, 22021.4]   0.89%   1.07%
+FP cf5L-f9[simd] 37e41475 checker           37749.5        [37631.8, 37867.3]   0.31%   0.37%
+FP cf5L-f9[simd] 37e41475 cube             227924.4      [226504.4, 229344.4]   0.62%   0.75%
+FP cf768w5L[torch] f65c49fe checker          3972.0          [3967.1, 3976.9]   0.12%   0.15%
+FP cf768w5L[torch] f65c49fe cube            17225.3        [16860.6, 17590.0]   2.12%   2.53%
+FP cf768w5L[simd] f65c49fe checker          27665.0        [27508.8, 27821.1]   0.56%   0.68%
+FP cf768w5L[simd] f65c49fe cube            160657.5      [159451.5, 161863.4]   0.75%   0.90%
+FP cfW1[torch] 4f86345a checker              3673.1          [3667.9, 3678.3]   0.14%   0.17%
+FP cfW1[torch] 4f86345a cube                15851.5        [15565.0, 16138.0]   1.81%   2.16%
+FP cfW1[simd] 4f86345a checker              24309.0        [24178.3, 24439.7]   0.54%   0.64%
+FP cfW1[simd] 4f86345a cube                127752.5      [126551.2, 128953.7]   0.94%   1.12%
+FP cf768x768[torch] de9e6e84 checker         3080.2          [3077.8, 3082.6]   0.08%   0.09%
+FP cf768x768[torch] de9e6e84 cube           12572.1        [11766.0, 13378.2]   6.41%   7.67%
+FP cf768x768[simd] de9e6e84 checker         19767.5        [19604.1, 19931.0]   0.83%   0.99%
+FP cf768x768[simd] de9e6e84 cube            93412.3        [92434.8, 94389.8]   1.05%   1.25%
+FP p5s-1L[torch] fa2c6935 checker           22736.7        [22699.8, 22773.6]   0.16%   0.19%
+FP p5s-1L[simd] fa2c6935 checker           162613.2      [162309.9, 162916.4]   0.19%   0.22%
+FP p5s-2L[torch] e8c0c760 checker            7559.3          [7550.3, 7568.4]   0.12%   0.14%
+FP p5s-2L[simd] e8c0c760 checker            52972.7        [52782.5, 53163.0]   0.36%   0.43%
+FP p5s-3L[torch] 3da8e498 checker            5785.9          [5777.6, 5794.2]   0.14%   0.17%
+FP p5s-3L[simd] 3da8e498 checker            41727.7        [41504.1, 41951.2]   0.54%   0.64%
+FP p5-4L256[torch] ac95a983 checker          5124.8          [5119.4, 5130.1]   0.10%   0.13%
+FP p5-4L256[simd] ac95a983 checker          36848.1        [36703.6, 36992.6]   0.39%   0.47%
+FP p5-5L[torch] bade7d51 checker             4599.4          [4595.0, 4603.7]   0.10%   0.11%
+FP p5-5L[simd] bade7d51 checker             33490.1        [33350.4, 33629.8]   0.42%   0.50%
+FP p5-768w5L[torch] bd1a7931 checker         3623.5          [3620.2, 3626.7]   0.09%   0.11%
+FP p5-768w5L[simd] bd1a7931 checker         26828.6        [26776.2, 26881.0]   0.20%   0.23%
+FP p5-768w6L[torch] a9df2ffc checker         3356.9          [3354.0, 3359.8]   0.09%   0.10%
+FP p5-768w6L[simd] a9df2ffc checker         25393.6        [25320.2, 25467.0]   0.29%   0.35%
+FP p5-768x768[torch] b3fad4eb checker        2814.4          [2811.3, 2817.4]   0.11%   0.13%
+FP p5-768x768[simd] b3fad4eb checker        20314.6        [20257.8, 20371.4]   0.28%   0.33%
+
+  between-sweep sd across rows: median 0.40%, range 0.09-7.67%
+  (the design assumes ~1.5%; if these are much larger, add sweeps)
+
+## fast/hh0
+8 sweeps, t(7 df) = 2.365
+
+row                                                    mean            95% t-interval     +-%     sd%
+FP prob5c[torch]-0ply checker                        5113.0          [5106.7, 5119.3]   0.12%   0.15%
+FP prob5c[simd]-0ply checker                        36837.7        [36665.4, 37010.0]   0.47%   0.56%
+FP hh-fox-0ply checker                              23818.0        [23665.1, 23970.9]   0.64%   0.77%
+FP hh-aureus-0ply checker                           14579.5        [13988.3, 15170.7]   4.06%   4.85%
+FP PureTD-C[torch] 0-ply (4L cubeful) checker        5645.3          [5639.2, 5651.4]   0.11%   0.13%
+FP PureTD-C[torch] 0-ply (4L cubeful) cube          24140.1        [23304.8, 24975.4]   3.46%   4.14%
+FP PureTD-C[simd] 0-ply (4L cubeful) checker        43624.7        [43492.1, 43757.2]   0.30%   0.36%
+FP PureTD-C[simd] 0-ply (4L cubeful) cube          264422.1      [263820.5, 265023.7]   0.23%   0.27%
+FP HedgeHog fox 0-ply checker                       25260.5        [25134.8, 25386.2]   0.50%   0.60%
+FP HedgeHog fox 0-ply cube                         322780.5      [316268.1, 329292.8]   2.02%   2.41%
+FP HedgeHog aureus 0-ply checker                    14676.3        [14318.6, 15034.0]   2.44%   2.91%
+FP HedgeHog aureus 0-ply cube                      207682.5      [198645.8, 216719.2]   4.35%   5.20%
+
+  between-sweep sd across rows: median 0.68%, range 0.13-5.20%
+  (the design assumes ~1.5%; if these are much larger, add sweeps)
+
+## slow/bench
+8 sweeps, t(7 df) = 2.365
+
+row                                                                     mean            95% t-interval     +-%     sd%
+FIXEDPOOL findbestmove 2-ply (default filters)                          72.4              [72.3, 72.5]   0.17%   0.21%
+FIXEDPOOL cubeful findbestmove 2-ply (default filters)                  75.3              [75.1, 75.4]   0.20%   0.24%
+FIXEDPOOL cube cfevaluate 2-ply                                        248.4            [247.7, 249.2]   0.31%   0.37%
+FP prob5c[torch]-1ply root-filter 0.08 checker                          80.0              [80.0, 80.0]   0.06%   0.07%
+FP prob5c[simd]-1ply root-filter 0.08 checker                          556.8            [555.9, 557.6]   0.15%   0.18%
+FP PureTD-C[torch] 1-ply root-filter 0.08 (4L cubeful) checker          63.5              [63.4, 63.5]   0.07%   0.08%
+FP PureTD-C[torch] 1-ply root-filter 0.08 (4L cubeful) cube            136.4            [136.4, 136.5]   0.03%   0.03%
+FP PureTD-C[simd] 1-ply root-filter 0.08 (4L cubeful) checker          475.1            [474.2, 475.9]   0.18%   0.21%
+FP PureTD-C[simd] 1-ply root-filter 0.08 (4L cubeful) cube            1052.2          [1049.6, 1054.8]   0.24%   0.29%
+FP Open Sage 1-ply checker                                              52.0              [51.5, 52.4]   0.83%   1.00%
+FP Open Sage 1-ply cube                                               1872.6          [1862.7, 1882.6]   0.53%   0.63%
+FP Open Sage 1-ply filtered checker                                   1076.2          [1066.4, 1086.0]   0.91%   1.09%
+
+  between-sweep sd across rows: median 0.23%, range 0.03-1.09%
+  (the design assumes ~1.5%; if these are much larger, add sweeps)
+
+## slow/sagewarm
+8 sweeps, t(7 df) = 2.365
+
+row                                          mean            95% t-interval     +-%     sd%
+FP Open Sage 1-ply filtered checker        1196.9          [1184.4, 1209.4]   1.04%   1.25%
+
+  between-sweep sd across rows: median 1.25%, range 1.25-1.25%
+  (the design assumes ~1.5%; if these are much larger, add sweeps)

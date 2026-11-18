@@ -459,7 +459,9 @@ def test_position5_equities_match_desktop(config):
 # Cube (double) decisions where the proper action flips between 0-ply and
 # 1-ply, verified against desktop gnubg 1.08: cubeless equity, every
 # cubeful equity, and the proper cube action. 1-ply uses the
-# "pruning off" config, matching the desktop analysis setting.
+# "pruning off" config, matching the desktop analysis setting. Equities
+# are recorded to 3 decimals; builds differ in the last digit.
+DESKTOP_TOL = 1e-3
 DESKTOP_CUBE = [
     dict(gid="2GYLAEe4e7gACA:MAEAAAAAAAAA",
          ply0=dict(cubeless=0.424, proper="Double, take",
@@ -512,15 +514,20 @@ def _gnubg_cube_hint(gid, plies, full=True):
 @pytest.mark.parametrize("plies", [0, 1])
 def test_cube_action_matches_desktop(pos, plies):
     """gnubg-ext reproduces desktop's cube-decision analysis (cubeless
-    equity, each cubeful equity, and the proper action) at 0-ply and
-    1-ply, and the proper action flips between the two depths."""
+    equity and each cubeful equity within DESKTOP_TOL, and the proper
+    action) at 0-ply and 1-ply, and the proper action flips between the
+    two depths."""
     exp = pos["ply%d" % plies]
     cubeless, cubeful, proper = _gnubg_cube_hint(pos["gid"], plies)
-    assert cubeless == exp["cubeless"], "cubeless %.3f != desktop %.3f" % (
+
+    def close(got, want):
+        return got is not None and round(abs(got - want), 6) <= DESKTOP_TOL
+
+    assert close(cubeless, exp["cubeless"]), "cubeless %s != desktop %.3f" % (
         cubeless, exp["cubeless"])
     assert proper == exp["proper"], "proper %r != desktop %r" % (proper, exp["proper"])
     for action, eq in exp["cubeful"].items():
-        assert cubeful.get(action) == eq, "%s: %s != desktop %.3f" % (
+        assert close(cubeful.get(action), eq), "%s: %s != desktop %.3f" % (
             action, cubeful.get(action), eq)
     # the two depths must genuinely disagree on the proper action
     assert pos["ply0"]["proper"] != pos["ply1"]["proper"]
