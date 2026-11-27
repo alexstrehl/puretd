@@ -656,7 +656,8 @@ def test_oneply_structure(agent1):
     """1-ply value: leaves fold the leaf player's cube decision at the
     agent's x, each root cube branch takes its own best reply per roll
     (as TDAgent's cubeful 1-ply), the roller's decision folded on top.
-    At least one position has branch replies that differ."""
+    Three positions of each kind, scanning on until one has branch replies
+    that differ (which positions tie depends on the net)."""
     import json
     from modes import MatchState, CubeOwner
     pool = json.load(open(FIXEDPOOL_CUBEFUL))
@@ -665,7 +666,7 @@ def test_oneply_structure(agent1):
     for r in pool["checker"]:
         s = BoardState(points=r["points"], bar=r["bar"], off=r["off"], turn=r["turn"])
         kind = "race" if is_race(s) else "contact"
-        if picked[kind] == 3 or any(t.is_game_over() for d in DICE for _, t in get_legal_plays(s, d)):
+        if (picked[kind] >= 3 and differ) or any(t.is_game_over() for d in DICE for _, t in get_legal_plays(s, d)):
             continue
         # the leaf player (the roller's opponent) is near its doubling window
         nd, dt = agent1._static_nd_dt(switch_turn(s), MatchState())
@@ -684,9 +685,9 @@ def test_oneply_structure(agent1):
                 assert own[1] >= shared[1] - 1e-12
                 differ += int(own[1] > shared[1] + 1e-5)
         picked[kind] += 1
-        if picked == {"contact": 3, "race": 3}:
+        if picked["contact"] >= 3 and picked["race"] >= 3 and differ:
             break
-    assert picked == {"contact": 3, "race": 3}
+    assert picked["contact"] >= 3 and picked["race"] >= 3
     assert differ >= 1
 
 

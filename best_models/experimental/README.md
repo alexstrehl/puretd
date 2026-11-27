@@ -6,8 +6,8 @@ former production 4L nets, both sides 0-ply, with 95% CIs:
 - cubeful: `best_models/history/cubeful_money_512_512_256_256_6afda0f8.pt` (md5 `6afda0f8`), capped ±128
 - prob5: `best_models/history/cubeless_prob5_512_512_256_256_ac95a983.pt` (md5 `ac95a983`)
 
-The current 4L nets, `4e25e4f7` (cubeful) and `88b03c1c` (prob5), are
-+7.2 [+6.4, +8.0] and +2.9 [+2.5, +3.3] over these references (luck-adjusted, 200k games).
+The current 4L nets, `3aad8855` (cubeful) and `1cbd8a17` (prob5), are
++10.3 [+9.4, +11.2] and +3.3 [+2.9, +3.7] over these references (luck-adjusted, 200k games).
 
 | file | type | md5 | mEq [95% CI] |
 |---|---|---|---|

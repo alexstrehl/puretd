@@ -145,14 +145,23 @@ def _estimate(x):
                 pair_variance=var)
 
 
+def capped_luck(raw, luck, payoff_cap):
+    """Luck scaled with the payoff cap: a game whose payoff exceeds the cap
+    in absolute value has its luck multiplied by cap/|payoff|; other games
+    keep their luck unchanged."""
+    raw, luck = np.asarray(raw, dtype=np.float64), np.asarray(luck, dtype=np.float64)
+    a = np.abs(raw)
+    return luck * np.where(a > payoff_cap, payoff_cap / np.maximum(a, payoff_cap), 1.0)
+
+
 def luck_estimates(raw, luck, beta=1.0, payoff_cap=None):
     """Fixed-beta raw and adjusted estimates over pairs, without timings.
 
     `raw` and `luck` have shape (n_pairs, 2) from side1's view. Leg 0 has
     side1 as White and leg 1 as Black. `payoff_cap` clips the payoff Y
-    before the centered control is subtracted, never the adjusted
-    observation. It changes the estimated target, not the cube rules of
-    the played games.
+    before the control is subtracted, never the adjusted observation, and
+    scales a capped game's luck by the same factor (:func:`capped_luck`).
+    It changes the estimated target, not the cube rules of the played games.
     """
     if not math.isfinite(beta):
         raise ValueError("beta must be finite and fixed before confirmation")
@@ -163,6 +172,8 @@ def luck_estimates(raw, luck, beta=1.0, payoff_cap=None):
         raise ValueError("nonfinite payoff/correction")
     if payoff_cap is not None and (not math.isfinite(payoff_cap) or payoff_cap <= 0):
         raise ValueError("payoff_cap must be finite and positive")
+    if payoff_cap is not None:
+        luck = capped_luck(raw, luck, payoff_cap)
     target = raw if payoff_cap is None else np.clip(raw, -payoff_cap, payoff_cap)
     y, c = target.mean(axis=1), luck.mean(axis=1)
     adjusted = y - beta * c

@@ -202,16 +202,23 @@ def test_worker_chunking_does_not_change_games(engines):
         np.testing.assert_array_equal(together[key], np.concatenate([d[key] for d in chunks]))
 
 
-def test_capped_target_is_clipped_before_subtracting_luck():
+def test_capped_target_clips_payoff_and_scales_its_luck():
     d = fake_data(4)
     d["raw"] = np.array([[256., -1.], [-512., 4.], [1., 2.], [256., -256.]])
     d["luck"] = np.array([[200., 0.], [-400., 0.], [0., 0.], [0., -300.]])
     s = V.summarize(d, payoff_cap=128)
-    want = (np.clip(d["raw"], -128, 128) - d["luck"]).mean()
-    wrong = np.clip(d["raw"] - d["luck"], -128, 128).mean()
+    scale = np.where(np.abs(d["raw"]) > 128, 128 / np.abs(d["raw"]), 1.0)
+    want = (np.clip(d["raw"], -128, 128) - d["luck"] * scale).mean()
+    wrong = (np.clip(d["raw"], -128, 128) - d["luck"]).mean()
     assert want != wrong
     assert s["adjusted"]["mean_mEq"] == pytest.approx(1000 * want)
     assert s["tails"]["games_over_128"] == 4
+
+
+def test_capped_luck_leaves_games_within_the_cap_unchanged():
+    raw = np.array([[128., -3.], [-64., 1.]])
+    luck = np.array([[5., -2.], [7., 0.5]])
+    np.testing.assert_array_equal(V.capped_luck(raw, luck, 128), luck)
 
 
 @pytest.fixture(scope="module")
