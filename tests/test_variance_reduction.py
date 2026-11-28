@@ -202,23 +202,39 @@ def test_worker_chunking_does_not_change_games(engines):
         np.testing.assert_array_equal(together[key], np.concatenate([d[key] for d in chunks]))
 
 
-def test_capped_target_clips_payoff_and_scales_its_luck():
+def test_capped_estimate_is_the_clipped_raw_mean_without_luck():
     d = fake_data(4)
     d["raw"] = np.array([[256., -1.], [-512., 4.], [1., 2.], [256., -256.]])
     d["luck"] = np.array([[200., 0.], [-400., 0.], [0., 0.], [0., -300.]])
-    s = V.summarize(d, payoff_cap=128)
-    scale = np.where(np.abs(d["raw"]) > 128, 128 / np.abs(d["raw"]), 1.0)
-    want = (np.clip(d["raw"], -128, 128) - d["luck"] * scale).mean()
-    wrong = (np.clip(d["raw"], -128, 128) - d["luck"]).mean()
-    assert want != wrong
-    assert s["adjusted"]["mean_mEq"] == pytest.approx(1000 * want)
-    assert s["tails"]["games_over_128"] == 4
+    s = V.capped_estimate(d["raw"], 128)
+    assert s["luck_adjusted"] is False
+    assert "adjusted" not in s and "correction" not in s
+    assert s["raw"]["mean_mEq"] == pytest.approx(1000 * np.clip(d["raw"], -128, 128).mean())
+    assert s["games_over_cap"] == 4
 
 
-def test_capped_luck_leaves_games_within_the_cap_unchanged():
-    raw = np.array([[128., -3.], [-64., 1.]])
-    luck = np.array([[5., -2.], [7., 0.5]])
-    np.testing.assert_array_equal(V.capped_luck(raw, luck, 128), luck)
+def test_exclusion_drops_whole_pairs_with_a_game_over_the_cap():
+    d = fake_data(6)
+    d["raw"][1, 0], d["raw"][4, 1], d["raw"][5, 0] = 256., -512., 128.
+    d["cube_value"] = np.ones((6, 2), dtype=np.int32)
+    d["cube_value"][1, 0], d["cube_value"][4, 1] = 128, 256
+    s = V.summarize(d, exclude_over=128)
+    keep = np.array([True, False, True, True, False, True])
+    want = V.summarize({k: v[keep] for k, v in d.items()})
+    assert s["excluded"] == dict(over=128, pairs=2, games=4, max_abs_payoff=512., max_cube=256)
+    assert s["pairs"] == 4 and s["games"] == 8
+    assert {k: v for k, v in s.items() if k != "excluded"} == want
+    rows = V.cubeful_rows(d)
+    assert rows["excl128"] == s and rows["capped128"] == V.capped_estimate(d["raw"], 128)
+
+
+def test_exclusion_without_games_over_the_cap_equals_the_plain_estimate():
+    d = fake_data(8)
+    d["cube_value"] = np.ones((8, 2), dtype=np.int32)
+    s = V.summarize(d, exclude_over=128)
+    assert s.pop("excluded") == dict(over=128, pairs=0, games=0, max_abs_payoff=None,
+                                     max_cube=None)
+    assert s == V.summarize(d)
 
 
 @pytest.fixture(scope="module")

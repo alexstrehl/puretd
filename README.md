@@ -2,7 +2,7 @@
 
 A backgammon AI trained entirely through self-play [reinforcement learning](https://en.wikipedia.org/wiki/Reinforcement_learning). The core method is temporal-difference learning with a neural network over Tesauro's original feature encoding ([TD-Gammon](https://en.wikipedia.org/wiki/TD-Gammon)). Besides sampled Bellman backups, the trainer implements exact Bellman backups (expected backups). Training uses Python multiprocessing: self-play runs in parallel worker processes, the update step in the main process, optionally on a GPU. Supported games: 1-point matches (DMP) and money games; match play is planned and actively being worked on.
 
-**Key results:** A 563k-parameter network scores +38.4 mEq/game against gnubg 1-ply¹ (400k luck-adjusted games, 95% CI [+37.6, +39.2]) in cubeful money games. XG++ analysis of 250 self-play games gives this model a Performance Rating (PR) of 0.70 (95% CI [0.62, 0.78]).
+**Key results:** A 563k-parameter network scores +38.8 mEq/game against gnubg 1-ply¹ (400k luck-adjusted games, 95% CI [+38.0, +39.6]) in cubeful money games. XG++ analysis of 250 self-play games gives this model a Performance Rating (PR) of 0.70 (95% CI [0.62, 0.78]).
 
 Two findings:
 1. For money games, simple RL techniques produce a base model nearly as good as or better than gnubg's base model.
@@ -23,7 +23,7 @@ To our knowledge this is the first open-source backgammon AI trained entirely th
 | 4L cubeless prob5 | cubeless-money | prob5 | [512,512,256,256] | 562k | **+48.6 mEq/game** [+48.3, +49.0] | — | `1cbd8a17` | `best_models/cubeless_prob5_512_512_256_256.pt` |
 | Wide 5L cubeless prob5 | cubeless-money | prob5 | [768,768,256,256,256] | 1,072k | **+55.6 mEq/game** [+55.1, +56.1] | — | `b8d4306c` | `best_models/experimental/cubeless_prob5_768_768_256_256_256.pt` |
 
-*"vs gnubg 0-ply": 200k games (100k paired-dice pairs) per row (4L cubeful and 4L prob5: 400k games), scored with the luck-adjusted estimator ([variance.py](experiments/head_to_head/variance.py), beta 1, luck reference the former 4L net of the same family, `6afda0f8` or `ac95a983`), 95% CIs over pairs. Cubeful rows use Jacoby. Per-game equity is capped at ±128; a capped game's luck term is scaled by the same factor. All rows play the real gnubg 1.08.003 binary over its external-player socket. XG++ PR is the eXtreme Gammon (XG++) Performance Rating, lower is better, measured at 0-ply on 250 self-play games with bootstrap 95% CIs. Pooled outputs: 4L rows [results/gnubg_vr_20261121/](experiments/head_to_head/results/gnubg_vr_20261121/), wide 5L rows [results/gnubg_vr_20261105/](experiments/head_to_head/results/gnubg_vr_20261105/).*
+*"vs gnubg 0-ply": 200k games (100k paired-dice pairs) per row (4L cubeful and 4L prob5: 400k games), scored with the luck-adjusted estimator ([variance.py](experiments/head_to_head/variance.py), beta 1, luck reference the former 4L net of the same family, `6afda0f8` or `ac95a983`), 95% CIs over pairs. Cubeful rows use Jacoby and are luck-adjusted with no cap; no game in them exceeded ±128. All rows play the real gnubg 1.08.003 binary over its external-player socket. XG++ PR is the eXtreme Gammon (XG++) Performance Rating, lower is better, measured at 0-ply on 250 self-play games with bootstrap 95% CIs. Pooled outputs: 4L rows [results/gnubg_vr_20261121/](experiments/head_to_head/results/gnubg_vr_20261121/), wide 5L rows [results/gnubg_vr_20261105/](experiments/head_to_head/results/gnubg_vr_20261105/).*
 
 ## How It Works
 
@@ -274,4 +274,4 @@ MIT ([LICENSE](LICENSE)), except [third_party_opponents/gnubg/gnubg_bench/benchp
 
 ---
 
-¹ GNU Backgammon 1.08.003 at its default settings (`gnubg-ext`). Per-game equity is capped at ±128, as in every head-to-head here; a capped game's luck term is scaled by the same factor.
+¹ GNU Backgammon 1.08.003 at its default settings (`gnubg-ext`). 200k paired-dice pairs (seed 20261127), our net at 0-ply, luck-adjusted with [variance.py](experiments/head_to_head/variance.py) (beta 1, luck reference `6afda0f8`). A pair in which either game's payoff exceeds ±128 is excluded; none did (largest cube 64). Pooled output: [cf4L_3aad8855_vs_gnubg1.json](experiments/head_to_head/results/gnubg_vr_20261121/cf4L_3aad8855_vs_gnubg1.json).

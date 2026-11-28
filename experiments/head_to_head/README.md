@@ -179,10 +179,16 @@ python experiments/head_to_head/variance.py --summarize DIR/*.npz
 Every game is also played without the correction, which checks that the
 correction changes neither play nor dice and times both paths. `--beta`
 (default 1) is fixed before a run. CIs are normal over pair means. Cubeful
-runs also report the capped target `clip(payoff, -128, 128) - beta * s * luck`,
-where `s = 128/|payoff|` for a game whose payoff exceeds 128 and 1 otherwise:
-a capped game's luck shrinks with its payoff, so one runaway cube cannot
-dominate the capped row. A run writes a `.npz` (per-game payoff, luck, turns,
+runs also report:
+
+- `excl128`: the luck-adjusted estimate over the pairs in which neither game
+  has |payoff| > 128; `excluded` gives the number of dropped pairs, their
+  largest |payoff| and largest final cube.
+  When any pair is dropped, quote the uncapped luck-adjusted figure beside it.
+- `capped128`: the raw mean with each game's payoff clipped to ±128. Not
+  luck-adjusted.
+
+A run writes a `.npz` (per-game payoff, luck, turns,
 timings, metadata) and a `.json` summary; `run.py --combine` does not read
 them.
 

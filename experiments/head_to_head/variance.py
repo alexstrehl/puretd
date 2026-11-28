@@ -145,23 +145,11 @@ def _estimate(x):
                 pair_variance=var)
 
 
-def capped_luck(raw, luck, payoff_cap):
-    """Luck scaled with the payoff cap: a game whose payoff exceeds the cap
-    in absolute value has its luck multiplied by cap/|payoff|; other games
-    keep their luck unchanged."""
-    raw, luck = np.asarray(raw, dtype=np.float64), np.asarray(luck, dtype=np.float64)
-    a = np.abs(raw)
-    return luck * np.where(a > payoff_cap, payoff_cap / np.maximum(a, payoff_cap), 1.0)
-
-
-def luck_estimates(raw, luck, beta=1.0, payoff_cap=None):
+def luck_estimates(raw, luck, beta=1.0):
     """Fixed-beta raw and adjusted estimates over pairs, without timings.
 
     `raw` and `luck` have shape (n_pairs, 2) from side1's view. Leg 0 has
-    side1 as White and leg 1 as Black. `payoff_cap` clips the payoff Y
-    before the control is subtracted, never the adjusted observation, and
-    scales a capped game's luck by the same factor (:func:`capped_luck`).
-    It changes the estimated target, not the cube rules of the played games.
+    side1 as White and leg 1 as Black.
     """
     if not math.isfinite(beta):
         raise ValueError("beta must be finite and fixed before confirmation")
@@ -170,12 +158,7 @@ def luck_estimates(raw, luck, beta=1.0, payoff_cap=None):
         raise ValueError("raw and luck must have matching (n_pairs >= 2, 2) shapes")
     if not np.isfinite(raw).all() or not np.isfinite(luck).all():
         raise ValueError("nonfinite payoff/correction")
-    if payoff_cap is not None and (not math.isfinite(payoff_cap) or payoff_cap <= 0):
-        raise ValueError("payoff_cap must be finite and positive")
-    if payoff_cap is not None:
-        luck = capped_luck(raw, luck, payoff_cap)
-    target = raw if payoff_cap is None else np.clip(raw, -payoff_cap, payoff_cap)
-    y, c = target.mean(axis=1), luck.mean(axis=1)
+    y, c = raw.mean(axis=1), luck.mean(axis=1)
     adjusted = y - beta * c
     r, z = _estimate(y), _estimate(adjusted)
     factor = r["pair_variance"] / z["pair_variance"] if z["pair_variance"] > 0 else None
@@ -187,26 +170,62 @@ def luck_estimates(raw, luck, beta=1.0, payoff_cap=None):
                      leg_z=[float(m / s) if s > 0 else None for m, s in zip(leg_mean, leg_se)])
     corr = float(np.corrcoef(y, c)[0, 1]) if np.var(y) > 0 and np.var(c) > 0 else None
     return dict(
-        pairs=len(y), games=raw.size, beta=beta, payoff_cap=payoff_cap, raw=r, adjusted=z,
+        pairs=len(y), games=raw.size, beta=beta, raw=r, adjusted=z,
         correction=cz, luck_centering=centering, raw_correction_correlation=corr,
         variance_factor=factor,
         tails=dict(max_abs_payoff=float(np.max(np.abs(raw))),
                    games_over_128=int(np.sum(np.abs(raw) > 128)),
                    max_abs_correction=float(np.max(np.abs(luck))),
-                   max_abs_adjusted=float(np.max(np.abs(target - beta * luck)))),
+                   max_abs_adjusted=float(np.max(np.abs(raw - beta * luck)))),
         ci_method="fixed-sample normal approximation over independent pair means",
     )
 
 
-def summarize(data, beta=1.0, payoff_cap=None):
+def _check_cap(cap, name):
+    if not math.isfinite(cap) or cap <= 0:
+        raise ValueError(f"{name} must be finite and positive")
+
+
+def capped_estimate(raw, payoff_cap):
+    """Raw mean over pairs with each game's payoff clipped to
+    ±payoff_cap. Not luck-adjusted."""
+    _check_cap(payoff_cap, "payoff_cap")
+    raw = np.asarray(raw, dtype=np.float64)
+    if raw.ndim != 2 or raw.shape[1] != 2 or len(raw) < 2:
+        raise ValueError("raw must have shape (n_pairs >= 2, 2)")
+    return dict(
+        pairs=len(raw), games=raw.size, payoff_cap=payoff_cap, luck_adjusted=False,
+        raw=_estimate(np.clip(raw, -payoff_cap, payoff_cap).mean(axis=1)),
+        games_over_cap=int(np.sum(np.abs(raw) > payoff_cap)),
+        ci_method="fixed-sample normal approximation over independent pair means",
+    )
+
+
+def summarize(data, beta=1.0, exclude_over=None):
     """Fixed-beta estimates over pairs (:func:`luck_estimates`) plus the
-    ordinary-versus-corrected timing comparison."""
-    est = luck_estimates(data["raw"], data["luck"], beta, payoff_cap)
+    ordinary-versus-corrected timing comparison.
+
+    `exclude_over` drops every pair in which either game has
+    |payoff| > exclude_over before estimating, and reports the dropped
+    pairs under ``excluded``."""
+    if exclude_over is not None:
+        _check_cap(exclude_over, "exclude_over")
+        raw = np.asarray(data["raw"])
+        over = (np.abs(raw) > exclude_over).any(axis=1)
+        out = summarize({k: np.asarray(v)[~over] for k, v in data.items()}, beta)
+        out["excluded"] = dict(
+            over=exclude_over, pairs=int(over.sum()), games=int(2 * over.sum()),
+            max_abs_payoff=float(np.abs(raw[over]).max()) if over.any() else None)
+        if "cube_value" in data:
+            out["excluded"]["max_cube"] = (int(np.asarray(data["cube_value"])[over].max())
+                                           if over.any() else None)
+        return out
+    est = luck_estimates(data["raw"], data["luck"], beta)
     wall, cpu = np.sum(data["seconds"], axis=0), np.sum(data["cpu_seconds"], axis=0)
     if np.any(wall <= 0) or np.any(cpu <= 0):
         raise ValueError("timings must be positive")
     factor = est["variance_factor"]
-    out = {k: est[k] for k in ("pairs", "games", "beta", "payoff_cap", "raw", "adjusted",
+    out = {k: est[k] for k in ("pairs", "games", "beta", "raw", "adjusted",
                                "correction", "luck_centering", "raw_correction_correlation",
                                "variance_factor")}
     out.update(
@@ -219,6 +238,14 @@ def summarize(data, beta=1.0, payoff_cap=None):
         tails=est["tails"], ci_method=est["ci_method"],
     )
     return out
+
+
+def cubeful_rows(data, beta=1.0):
+    """The extra cubeful entries: ``capped128`` (raw mean, payoff clipped
+    to ±128, not luck-adjusted) and ``excl128`` (luck-adjusted, pairs with
+    a game over ±128 dropped)."""
+    return dict(capped128=capped_estimate(data["raw"], 128),
+                excl128=summarize(data, beta, exclude_over=128))
 
 
 def load_runs(paths):
@@ -310,7 +337,7 @@ def main(argv=None):
         data, meta = load_runs(a.summarize)
         result = summarize(data, a.beta)
         if meta["game_mode"] == "cubeful-money":
-            result["capped128"] = summarize(data, a.beta, payoff_cap=128)
+            result.update(cubeful_rows(data, a.beta))
         if "gnubg_cube_clamps" in data:
             result["gnubg_cube_clamps"] = int(data["gnubg_cube_clamps"].sum())
         print(json.dumps(result, indent=2, allow_nan=False))
@@ -442,7 +469,7 @@ def main(argv=None):
     if has_external:
         result["gnubg_cube_clamps"] = int(data["gnubg_cube_clamps"].sum())
     if cubeful:
-        result["capped128"] = summarize(data, a.beta, payoff_cap=128)
+        result.update(cubeful_rows(data, a.beta))
         result["max_cube"] = int(data["cube_value"].max())
         result["drops"] = int(data["ended_by_drop"].sum())
     a.out.parent.mkdir(parents=True, exist_ok=True)
